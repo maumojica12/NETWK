@@ -36,15 +36,17 @@ MSG_CHAT = "CHAT_MESSAGE"
 MSG_ACK = "ACK"
 
 # ------------------------
-# UDP Utilities
+# UDP UTILITIES
 # ------------------------
 def send_message(sock, addr, message):
-    sock.sendto(json.dumps(message).encode(), addr)
+    raw = encode_protocol_message(message)
+    sock.sendto(raw, addr)
 
 def receive_message(sock):
     try:
         data, addr = sock.recvfrom(BUFFER_SIZE)
-        return json.loads(data.decode()), addr
+        msg = decode_protocol_message(data)
+        return msg, addr
     except (socket.timeout, ConnectionResetError):
         return None, None
     
@@ -52,6 +54,31 @@ def receive_message(sock):
 # ------------------------
 # PROTOCOL HELPERS (RFC style)
 # ------------------------
+def encode_protocol_message(msg_dict):
+    # Convert a dict into RFC-style 'key: value' lines, separated by newlines.
+    # Example:
+    #     {"message_type": "DISCOVER_HOST"} ->
+    #     "message_type: DISCOVER_HOST\\n"
+    lines = []
+    for k, v in msg_dict.items():
+        lines.append(f"{k}: {v}")
+    text = "\n".join(lines) + "\n"
+    return text.encode()  # bytes for sendto()
+
+
+def decode_protocol_message(raw_bytes):
+    # Convert RFC-style 'key: value' lines back into a dict (all values as strings).
+    text = raw_bytes.decode()
+    result = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        result[key.strip()] = value.strip()
+    return result
 
 
 # ------------------------
@@ -149,22 +176,23 @@ def host_peer():
                 continue
 
             msg_type = msg.get("message_type")
-            if msg_type == "DISCOVER_HOST":
+            if msg_type == MSG_DISCOVER_HOST:
                 if not prompt_visible:
                     print("message_type:", end="", flush=True)
                     prompt_visible = True
-                response = {"message_type": "DISCOVER_ACK"}
+                    
+                response = {"message_type": MSG_DISCOVER_ACK}
                 send_message(sock, addr, response)
-            elif msg_type == "HANDSHAKE_REQUEST":
+            elif msg_type == MSG_HANDSHAKE_REQUEST:
                 if not prompt_visible:
                     print("message_type:", end="", flush=True)
                     prompt_visible = True
 
                 seed = random.randint(0, 100000)
-                response = {"message_type": "HANDSHAKE_RESPONSE", "seed": seed}
+                response = {"message_type": MSG_HANDSHAKE_RESPONSE, "seed": seed}
                 send_message(sock, addr, response)
 
-                print(" HANDSHAKE_RESPONSE")
+                print(f" {MSG_HANDSHAKE_RESPONSE}")
                 print(f"seed: {seed}")
                 random.seed(seed)
                 state = CONNECTED
@@ -185,9 +213,9 @@ def joiner_peer(host_ip):
         host_found = False
         attempts = 0
         while attempts < MAX_RETRIES and not host_found:
-            send_message(sock, host_addr, {"message_type": "DISCOVER_HOST"})
+            send_message(sock, host_addr, {"message_type": MSG_DISCOVER_HOST})
             msg, addr = receive_message(sock)
-            if msg and msg.get("message_type") == "DISCOVER_ACK":
+            if msg and msg.get("message_type") == MSG_DISCOVER_ACK:
                 print("Host Found ...")
                 print(f"Host IP : {addr[0]}")
                 print(f"Host Broadcast Port: {addr[1]}")
@@ -209,7 +237,7 @@ def joiner_peer(host_ip):
         # Prompt user once host is confirmed
         while state == SETUP:
             message_type_input = input("message_type:").strip()
-            if message_type_input != "HANDSHAKE_REQUEST":
+            if message_type_input != MSG_HANDSHAKE_REQUEST:
                 print("Invalid input\n")
                 continue
 
@@ -218,11 +246,11 @@ def joiner_peer(host_ip):
             retries = 0
             while retries < MAX_RETRIES:
                 msg, _ = receive_message(sock)
-                if msg and msg.get("message_type") == "HANDSHAKE_RESPONSE":
-                    seed = msg["seed"]
+                if msg and msg.get("message_type") == MSG_HANDSHAKE_RESPONSE:
+                    seed = int(msg["seed"])
                     random.seed(seed)
 
-                    print("message_type: HANDSHAKE_RESPONSE")
+                    print(f"message_type: {MSG_HANDSHAKE_RESPONSE}")
                     print(f"seed: {seed}")
                     state = CONNECTED
                     break
