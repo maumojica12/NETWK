@@ -2,11 +2,12 @@ import socket
 import json
 import random
 import time
-
+from collections import deque
+#LAST WORKING FILE FROM TESTING WITH INA 
 # ------------------------
 # Configuration
 # ------------------------
-HOST_IP = "127.0.0.1"
+HOST_IP = "172.20.10.3"
 PORT = 5005
 BUFFER_SIZE = 4096
 TIMEOUT = 0.5
@@ -34,6 +35,9 @@ MSG_RESOLUTION_REQUEST = "RESOLUTION_REQUEST"
 MSG_GAME_OVER = "GAME_OVER"
 MSG_CHAT = "CHAT_MESSAGE"
 MSG_ACK = "ACK"
+
+# Buffered incoming messages captured while waiting for ACKs
+_pending_messages = deque()
 
 # ------------------------
 # UDP UTILITIES
@@ -82,16 +86,62 @@ def decode_protocol_message(raw_bytes):
 
 
 # ------------------------
+# RELIABILITY HELPERS
+# ------------------------
+current_seq = 0  # Global sequence counter for outgoing messages
+
+def get_next_seq():
+    global current_seq
+    current_seq += 1
+    return current_seq
+
+def _buffer_incoming(msg, addr):
+    """Store incoming message for later processing."""
+    _pending_messages.append((msg, addr))
+
+
+def _next_incoming(sock):
+    """Return buffered message if available, else read from socket."""
+    if _pending_messages:
+        return _pending_messages.popleft()
+    return receive_message(sock)
+
+# ------------------------
 # RELIABILITY
 # ------------------------
 def send_with_retry(sock, addr, message, max_retries=MAX_RETRIES, timeout=TIMEOUT):
-    # TODO: Wrap send_message() with ACK/timeout handling.
-    # Currently discovery and handshake in host_peer() and joiner_peer() do their
-    # own retry logic so this isn't needed at all, but it would be worth abstracting
-    # logic moving forward
+    # Add sequence number to message
+    seq = random.randint(1, 9999999)
+    message = message.copy()
+    message["sequence_number"] = seq
 
-    send_message(sock, addr, message) # stub
-    return True
+    for attempt in range(max_retries):
+        send_message(sock, addr, message)
+
+        start = time.time()
+        while time.time() - start < timeout:
+            msg, sender = receive_message(sock)
+            if not msg:
+                continue
+
+            # ACK received
+            if msg.get("message_type") == MSG_ACK and str(seq) == msg.get("ack_number"):
+                return True
+
+            # If the message contains its own sequence_number, ACK it
+            if "sequence_number" in msg:
+                ack = {"message_type": MSG_ACK, "ack_number": msg["sequence_number"]}
+                send_message(sock, sender, ack)
+
+        # retry
+    return False
+
+def receive_with_ack(sock):
+    msg, addr = receive_message(sock)
+    if msg and "sequence_number" in msg:
+        ack = {"message_type": MSG_ACK, "ack_number": msg["sequence_number"]}
+        send_message(sock, addr, ack)
+    return msg, addr
     
 # ------------------------
 # POKEMON DATA
@@ -158,9 +208,6 @@ def handle_incoming_chat(msg):
     pass
 
 
-# ------------------------
-# ROLE LOGIC: Host / Joiner / Spectator
-# ------------------------
 def host_peer():
     state = SETUP
     prompt_visible = False
@@ -171,18 +218,20 @@ def host_peer():
 
     try:
         while state == SETUP:
-            msg, addr = receive_message(sock)
+            msg, addr = receive_with_ack(sock)
             if not msg:
                 continue
 
             msg_type = msg.get("message_type")
+
             if msg_type == MSG_DISCOVER_HOST:
                 if not prompt_visible:
                     print("message_type:", end="", flush=True)
                     prompt_visible = True
-                    
+
                 response = {"message_type": MSG_DISCOVER_ACK}
-                send_message(sock, addr, response)
+                send_with_retry(sock, addr, response)
+
             elif msg_type == MSG_HANDSHAKE_REQUEST:
                 if not prompt_visible:
                     print("message_type:", end="", flush=True)
@@ -190,10 +239,12 @@ def host_peer():
 
                 seed = random.randint(0, 100000)
                 response = {"message_type": MSG_HANDSHAKE_RESPONSE, "seed": seed}
-                send_message(sock, addr, response)
+
+                send_with_retry(sock, addr, response)
 
                 print(f" {MSG_HANDSHAKE_RESPONSE}")
                 print(f"seed: {seed}")
+
                 random.seed(seed)
                 state = CONNECTED
     finally:
@@ -205,16 +256,16 @@ def joiner_peer(host_ip):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(TIMEOUT)
     host_addr = (host_ip, PORT)
-
     print("Searching for host...")
 
     try:
-        # Automatically discover host first
+        # Keep trying indefinitely until host responds
         host_found = False
         attempts = 0
         while attempts < MAX_RETRIES and not host_found:
-            send_message(sock, host_addr, {"message_type": MSG_DISCOVER_HOST})
-            msg, addr = receive_message(sock)
+            send_with_retry(sock, host_addr, {"message_type": MSG_DISCOVER_HOST})
+            msg, addr = receive_with_ack(sock)
+
             if msg and msg.get("message_type") == MSG_DISCOVER_ACK:
                 print("Host Found ...")
                 print(f"Host IP : {addr[0]}")
@@ -222,46 +273,29 @@ def joiner_peer(host_ip):
                 print(f"({addr[0]}, {addr[1]})")
                 host_found = True
                 break
-            else:
-                attempts += 1
-                if attempts < MAX_RETRIES:
-                    print("(Waiting for Host)")
-                    time.sleep(WAIT_FOR_HOST_DELAY)
 
-        if not host_found:
-            print("(Waiting for Host)")
-            time.sleep(WAIT_FOR_HOST_DELAY)
-            print("No active host found. Exiting.")
-            return
+            attempts += 1
+            if attempts < MAX_RETRIES:
+                print("(Waiting for Host)")
+                time.sleep(WAIT_FOR_HOST_DELAY)
 
-        # Prompt user once host is confirmed
+        # Handshake
         while state == SETUP:
-            message_type_input = input("message_type:").strip()
-            if message_type_input != MSG_HANDSHAKE_REQUEST:
+            user_input = input("message_type: ").strip()
+            if user_input != MSG_HANDSHAKE_REQUEST:
                 print("Invalid input\n")
                 continue
 
-            send_message(sock, host_addr, {"message_type": message_type_input})
-
-            retries = 0
-            while retries < MAX_RETRIES:
-                msg, _ = receive_message(sock)
+            if send_with_retry(sock, host_addr, {"message_type": MSG_HANDSHAKE_REQUEST}):
+                msg, _ = receive_with_ack(sock)
                 if msg and msg.get("message_type") == MSG_HANDSHAKE_RESPONSE:
                     seed = int(msg["seed"])
                     random.seed(seed)
-
-                    print(f"message_type: {MSG_HANDSHAKE_RESPONSE}")
+                    print("message_type: HANDSHAKE_RESPONSE")
                     print(f"seed: {seed}")
                     state = CONNECTED
-                    break
                 else:
-                    retries += 1
-                    if retries < MAX_RETRIES:
-                        send_message(sock, host_addr, {"message_type": message_type_input})
-
-            if state != CONNECTED:
-                print("No response from host, try again.")
-
+                    print("No response from host, retrying handshake...")
     finally:
         sock.close()
         print("Joiner socket closed.")
