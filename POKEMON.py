@@ -6,7 +6,7 @@ import time
 # ------------------------
 # Configuration
 # ------------------------
-HOST_IP = "127.0.0.1"  # Change if needed
+HOST_IP = "127.0.0.1"
 PORT = 5005
 BUFFER_SIZE = 4096
 TIMEOUT = 0.5
@@ -16,6 +16,24 @@ WAIT_FOR_HOST_DELAY = 6
 # States
 SETUP = "SETUP"
 CONNECTED = "CONNECTED"
+BATTLE_SETUP = "BATTLE_SETUP"
+WAITING_FOR_MOVE = "WAITING_FOR_MOVE"
+PROCESSING_TURN = "PROCESSING_TURN"
+GAME_OVER = "GAME_OVER"
+
+# Message Type Constants (Based on RFC)
+MSG_DISCOVER_HOST = "DISCOVER_HOST"
+MSG_DISCOVER_ACK = "DISCOVER_ACK"
+MSG_HANDSHAKE_REQUEST = "HANDSHAKE_REQUEST"
+MSG_HANDSHAKE_RESPONSE = "HANDSHAKE_RESPONSE"
+MSG_ATTACK_ANNOUNCE = "ATTACK_ANNOUNCE"
+MSG_DEFENSE_ANNOUNCE = "DEFENSE_ANNOUNCE"
+MSG_CALCULATION_REPORT = "CALCULATION_REPORT"
+MSG_CALCULATION_CONFIRM = "CALCULATION_CONFIRM"
+MSG_RESOLUTION_REQUEST = "RESOLUTION_REQUEST"
+MSG_GAME_OVER = "GAME_OVER"
+MSG_CHAT = "CHAT_MESSAGE"
+MSG_ACK = "ACK"
 
 # ------------------------
 # UDP Utilities
@@ -29,9 +47,92 @@ def receive_message(sock):
         return json.loads(data.decode()), addr
     except (socket.timeout, ConnectionResetError):
         return None, None
+    
 
 # ------------------------
-# Host Peer
+# PROTOCOL HELPERS (RFC style)
+# ------------------------
+
+
+# ------------------------
+# RELIABILITY
+# ------------------------
+def send_with_retry(sock, addr, message, max_retries=MAX_RETRIES, timeout=TIMEOUT):
+    # TODO: Wrap send_message() with ACK/timeout handling.
+    # Currently discovery and handshake in host_peer() and joiner_peer() do their
+    # own retry logic so this isn't needed at all, but it would be worth abstracting
+    # logic moving forward
+
+    send_message(sock, addr, message) # stub
+    return True
+    
+# ------------------------
+# POKEMON DATA
+# ------------------------
+def load_pokemon_data(csv_path="pokemon.csv"):
+    # TODO: Load Pokémon stats from CSV into a suitable structure.
+    # Implementation choice, not a hard written requirement as per RFC
+    # Whil RFC does not say anything about where data comes from explicitly,
+    # in practice especially for testing the CSV is the best resource for data
+    pass
+
+
+def get_pokemon(name, data):
+    # TODO: Fetch a single Pokémon's stats from loaded data.
+    # return data.get(name)
+    pass
+    
+# ------------------------
+# BATTLE STATE & DAMAGE MODEL SKELETON
+# ------------------------
+class BattleState:
+    # TODO: Represent the full battle state (Pokémon, HP, whose turn, etc.)
+
+    def __init__(self):
+        # placeholder attribute/s
+        # fill in later (e.g. host_poke, joiner_probe, hp, etc.)
+        self.example = None
+
+    def is_game_over(self):
+        # TODO: Return True/False and winner info.
+        return False
+
+
+def calculate_damage(attacker_stats, defender_stats, move_info):
+    # TODO: Implement damage as per RFC
+    pass
+
+# ------------------------
+# TURN FLOW SKELETON
+# ------------------------
+def run_turn_as_attacker(sock, peer_addr, battle_state):
+    # TODO: Implement the 4-step turn as attacker:
+    #     1. ATTACK_ANNOUNCE
+    #     2. DEFENSE_ANNOUNCE
+    #     3. CALCULATION_REPORT
+    #     4. CALCULATION_CONFIRM / RESOLUTION_REQUEST
+    pass
+
+
+def run_turn_as_defender(sock, peer_addr, battle_state):
+    # TODO: Implement the 4-step turn as defender
+    pass
+
+
+# ------------------------
+# CHAT SKELETON: Text + Stickers
+# ------------------------
+def send_chat_message(sock, addr, text=None, sticker_b64=None):
+    # TODO: Implement chat messages on top of the protocol
+    pass
+
+def handle_incoming_chat(msg):
+    # TODO: Handle and display incoming chat message (text/sticker)
+    pass
+
+
+# ------------------------
+# ROLE LOGIC: Host / Joiner / Spectator
 # ------------------------
 def host_peer():
     state = SETUP
@@ -71,9 +172,6 @@ def host_peer():
         sock.close()
         print("Host socket closed.")
 
-# ------------------------
-# Joiner Peer
-# ------------------------
 def joiner_peer(host_ip):
     state = SETUP
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -140,10 +238,15 @@ def joiner_peer(host_ip):
         sock.close()
         print("Joiner socket closed.")
 
+def spectator_peer(host_ip):
+    # TODO: Implement
+    # Temporary placeholder so spectator in main cleanly exits
+    print("Spectator mode is not yet implemented.")
+
 # ------------------------
-# Main
+# MAIN WRAPPER & ENTRY POINT
 # ------------------------
-if __name__ == "__main__":
+def main():
     print("Welcome to P2P Pokémon Battle Protocol")
     while True:
         role = input("Enter your role [Host, Joiner, Spectator]: ").strip().lower()
@@ -151,10 +254,14 @@ if __name__ == "__main__":
             host_peer()
             break
         elif role == "joiner":
-            joiner_peer(HOST_IP)
+            joiner_peer(HOST_IP) # Temporary (?)
             break
         elif role == "spectator":
+            # spectator_peer(HOST_IP)
             pass  # leave empty for now
             break
         else:
             print("Invalid role. Choose Host, Joiner, or Spectator.\n")
+
+if __name__ == "__main__":
+    main()
