@@ -1,6 +1,7 @@
 import socket
 import json
 import random
+import time
 
 # ------------------------
 # Configuration
@@ -10,6 +11,7 @@ PORT = 5005
 BUFFER_SIZE = 4096
 TIMEOUT = 0.5
 MAX_RETRIES = 3
+WAIT_FOR_HOST_DELAY = 6
 
 # States
 SETUP = "SETUP"
@@ -25,7 +27,7 @@ def receive_message(sock):
     try:
         data, addr = sock.recvfrom(BUFFER_SIZE)
         return json.loads(data.decode()), addr
-    except socket.timeout:
+    except (socket.timeout, ConnectionResetError):
         return None, None
 
 # ------------------------
@@ -33,6 +35,7 @@ def receive_message(sock):
 # ------------------------
 def host_peer():
     state = SETUP
+    prompt_visible = False
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((HOST_IP, PORT))
     sock.settimeout(TIMEOUT)
@@ -41,15 +44,27 @@ def host_peer():
     try:
         while state == SETUP:
             msg, addr = receive_message(sock)
-            if msg and msg.get("message_type") == "HANDSHAKE_REQUEST":
-                print("message_type:", end="", flush=True)
+            if not msg:
+                continue
+
+            msg_type = msg.get("message_type")
+            if msg_type == "DISCOVER_HOST":
+                if not prompt_visible:
+                    print("message_type:", end="", flush=True)
+                    prompt_visible = True
+                response = {"message_type": "DISCOVER_ACK"}
+                send_message(sock, addr, response)
+            elif msg_type == "HANDSHAKE_REQUEST":
+                if not prompt_visible:
+                    print("message_type:", end="", flush=True)
+                    prompt_visible = True
+
                 seed = random.randint(0, 100000)
                 response = {"message_type": "HANDSHAKE_RESPONSE", "seed": seed}
                 send_message(sock, addr, response)
 
                 print(" HANDSHAKE_RESPONSE")
                 print(f"seed: {seed}")
-                print("message_type:")
                 random.seed(seed)
                 state = CONNECTED
     finally:
@@ -67,23 +82,41 @@ def joiner_peer(host_ip):
 
     print("Searching for host...")
 
-    # Display host info immediately (we assume host IP/port is known)
-    print("Host Found ...")
-    print(f"Host IP : {host_addr[0]}")
-    print(f"Host Broadcast Port: {host_addr[1]}")
-    print(f"({host_addr[0]}, {host_addr[1]})")
-
     try:
+        # Automatically discover host first
+        host_found = False
+        attempts = 0
+        while attempts < MAX_RETRIES and not host_found:
+            send_message(sock, host_addr, {"message_type": "DISCOVER_HOST"})
+            msg, addr = receive_message(sock)
+            if msg and msg.get("message_type") == "DISCOVER_ACK":
+                print("Host Found ...")
+                print(f"Host IP : {addr[0]}")
+                print(f"Host Broadcast Port: {addr[1]}")
+                print(f"({addr[0]}, {addr[1]})")
+                host_found = True
+                break
+            else:
+                attempts += 1
+                if attempts < MAX_RETRIES:
+                    print("(Waiting for Host)")
+                    time.sleep(WAIT_FOR_HOST_DELAY)
+
+        if not host_found:
+            print("(Waiting for Host)")
+            time.sleep(WAIT_FOR_HOST_DELAY)
+            print("No active host found. Exiting.")
+            return
+
+        # Prompt user once host is confirmed
         while state == SETUP:
             message_type_input = input("message_type:").strip()
             if message_type_input != "HANDSHAKE_REQUEST":
                 print("Invalid input\n")
                 continue
 
-            # Send handshake request to host
             send_message(sock, host_addr, {"message_type": message_type_input})
 
-            # Wait for host response with retries
             retries = 0
             while retries < MAX_RETRIES:
                 msg, _ = receive_message(sock)
@@ -98,12 +131,9 @@ def joiner_peer(host_ip):
                 else:
                     retries += 1
                     if retries < MAX_RETRIES:
-                        # Resend the request
                         send_message(sock, host_addr, {"message_type": message_type_input})
-            
-            if state == CONNECTED:
-                break
-            else:
+
+            if state != CONNECTED:
                 print("No response from host, try again.")
 
     finally:
