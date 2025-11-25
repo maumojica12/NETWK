@@ -1,9 +1,9 @@
 import socket
-import json
+import csv
 import random
 import time
 from collections import deque
-#LAST WORKING FILE FROM TESTING WITH INA 
+
 # ------------------------
 # Configuration
 # ------------------------
@@ -35,6 +35,11 @@ MSG_RESOLUTION_REQUEST = "RESOLUTION_REQUEST"
 MSG_GAME_OVER = "GAME_OVER"
 MSG_CHAT = "CHAT_MESSAGE"
 MSG_ACK = "ACK"
+
+# Globals
+current_seq = 0         # Sequence counter for incoming messages
+POKEMON_DATA = None     # Cached CSV
+
 
 # Buffered incoming messages captured while waiting for ACKs
 _pending_messages = deque()
@@ -88,7 +93,6 @@ def decode_protocol_message(raw_bytes):
 # ------------------------
 # RELIABILITY HELPERS
 # ------------------------
-current_seq = 0  # Global sequence counter for outgoing messages
 
 def get_next_seq():
     global current_seq
@@ -111,7 +115,7 @@ def _next_incoming(sock):
 # ------------------------
 def send_with_retry(sock, addr, message, max_retries=MAX_RETRIES, timeout=TIMEOUT):
     # Add sequence number to message
-    seq = random.randint(1, 9999999)
+    seq = get_next_seq()
     message = message.copy()
     message["sequence_number"] = seq
 
@@ -125,7 +129,7 @@ def send_with_retry(sock, addr, message, max_retries=MAX_RETRIES, timeout=TIMEOU
                 continue
 
             # ACK received
-            if msg.get("message_type") == MSG_ACK and str(seq) == msg.get("ack_number"):
+            if msg.get("message_type") == MSG_ACK and seq == msg.get("ack_number", -1):
                 return True
 
             # If the message contains its own sequence_number, ACK it
@@ -147,23 +151,73 @@ def receive_with_ack(sock):
 # POKEMON DATA
 # ------------------------
 def load_pokemon_data(csv_path="pokemon.csv"):
-    # TODO: Load Pokémon stats from CSV into a suitable structure.
-    # Implementation choice, not a hard written requirement as per RFC
-    # Whil RFC does not say anything about where data comes from explicitly,
-    # in practice especially for testing the CSV is the best resource for data
-    pass
+    # TODO: Load Pokemon stats from CSV into a suitable structure.
+    # Returns:
+    # dict[str, dict]: e.g. data["bulbasaur"] -> {
+    #     "name": "Bulbasaur",
+    #     "hp": 45,
+    #     "attack": 49,
+    #     "defense": 49,
+    #     "sp_attack": 65,
+    #     "sp_defense": 65,
+    #     "speed": 45,
+    #     "type1": "grass",
+    #     "type2": "poison" or None,
+    # }
+    global POKEMON_DATA 
+    data = {}
+
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            name = (row.get("name") or "").strip()
+            if not name:
+                continue
+
+            def parse_int(key, default=0):
+                try:
+                    return int(float(row.get(key, default))) # values are strings in the csv and could be returned as "67.0"
+                except (ValueError, TypeError):
+                    return default
+            
+            entry = {
+                "name": name,
+                "hp": parse_int("hp"),
+                "attack": parse_int("attack"),
+                "defense": parse_int("defense"),
+                "sp_attack": parse_int("sp_attack"),
+                "sp_defense": parse_int("sp_defense"),
+                "speed": parse_int("speed"),
+                "type1": (row.get("type1") or "").strip() or None,
+                "type2": (row.get("type2") or "").strip() or None,
+            }
+
+            data[name.lower()] = entry
+    
+    POKEMON_DATA = data
+    return data
 
 
 def get_pokemon(name, data):
-    # TODO: Fetch a single Pokémon's stats from loaded data.
+    # Look up a Pokemon by name
     # return data.get(name)
-    pass
+    if not name:
+        return None
+    
+    # if no data passed, fall back to global cache
+    global POKEMON_DATA
+    if data is None:
+        if POKEMON_DATA is None:
+            POKEMON_DATA = load_pokemon_data()
+        data = POKEMON_DATA
+    
+    return data.get(name.strip().lower())
     
 # ------------------------
 # BATTLE STATE & DAMAGE MODEL SKELETON
 # ------------------------
 class BattleState:
-    # TODO: Represent the full battle state (Pokémon, HP, whose turn, etc.)
+    # TODO: Represent the full battle state (Pokemon, HP, whose turn, etc.)
 
     def __init__(self):
         # placeholder attribute/s
@@ -309,7 +363,7 @@ def spectator_peer(host_ip):
 # MAIN WRAPPER & ENTRY POINT
 # ------------------------
 def main():
-    print("Welcome to P2P Pokémon Battle Protocol")
+    print("Welcome to P2P Pokemon Battle Protocol")
     while True:
         role = input("Enter your role [Host, Joiner, Spectator]: ").strip().lower()
         if role == "host":
