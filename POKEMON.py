@@ -180,6 +180,15 @@ def load_pokemon_data(csv_path="pokemon.csv"):
                 except (ValueError, TypeError):
                     return default
             
+            effectiveness_cols = [
+                "against_bug", "against_dark", "against_dragon",
+                "against_electric", "against_fairy", "against_fight",
+                "against_fire", "against_flying", "against_ghost",
+                "against_grass", "against_ground", "against_ice",
+                "against_normal", "against_poison", "against_psychic",
+                "against_rock", "against_steel", "against_water",
+            ]
+
             entry = {
                 "name": name,
                 "hp": parse_int("hp"),
@@ -191,6 +200,15 @@ def load_pokemon_data(csv_path="pokemon.csv"):
                 "type1": (row.get("type1") or "").strip() or None,
                 "type2": (row.get("type2") or "").strip() or None,
             }
+
+            # add all against_* multipliers
+            for col in effectiveness_cols:
+                raw = row.get(col, "1")
+                
+            try:
+                entry[col] = float(raw)
+            except (TypeError, ValueError):
+                entry[col] = 1.0
 
             data[name.lower()] = entry
     
@@ -228,6 +246,18 @@ class BattleState:
         # TODO: Return True/False and winner info.
         return False
 
+def get_type_effectiveness(move_type: str, defender_stats: dict) -> float:
+    # Looks up how effective this move's type is against the defender
+    # using the aganist_[type] coloumns from pokemon.csv
+    # TODO: Nalilito po ako sa against_{type} fields sa csv
+    # maybe inaantok lang. This function is NOT final and subject to change
+    col_name = f"against_{move_type.lower()}"
+    raw = defender_stats.get(col_name, "1")
+
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return 1.0
 
 def calculate_damage(attacker_stats, defender_stats, move_info):
     # TODO: Implement damage as per RFC
