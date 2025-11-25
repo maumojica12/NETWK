@@ -27,6 +27,8 @@ MSG_DISCOVER_HOST = "DISCOVER_HOST"
 MSG_DISCOVER_ACK = "DISCOVER_ACK"
 MSG_HANDSHAKE_REQUEST = "HANDSHAKE_REQUEST"
 MSG_HANDSHAKE_RESPONSE = "HANDSHAKE_RESPONSE"
+MSG_SPECTATOR_REQUEST = "SPECTATOR_REQUEST"
+MSG_SPECTATOR_WELCOME = "SPECTATOR_WELCOME"
 MSG_ATTACK_ANNOUNCE = "ATTACK_ANNOUNCE"
 MSG_DEFENSE_ANNOUNCE = "DEFENSE_ANNOUNCE"
 MSG_CALCULATION_REPORT = "CALCULATION_REPORT"
@@ -39,6 +41,7 @@ MSG_ACK = "ACK"
 # Globals
 current_seq = 0         # Sequence counter for incoming messages
 POKEMON_DATA = None     # Cached CSV
+SPECTATORS = set()      # (ip, port) pairs of connected spectators
 
 
 # Buffered incoming messages captured while waiting for ACKs
@@ -129,7 +132,7 @@ def send_with_retry(sock, addr, message, max_retries=MAX_RETRIES, timeout=TIMEOU
                 continue
 
             # ACK received
-            if msg.get("message_type") == MSG_ACK and seq == msg.get("ack_number", -1):
+            if msg.get("message_type") == MSG_ACK and str(seq) == msg.get("ack_number", -1):
                 return True
 
             # If the message contains its own sequence_number, ACK it
@@ -293,6 +296,7 @@ def handle_incoming_chat(msg):
 
 
 def host_peer():
+    global SPECTATORS
     state = SETUP
     prompt_visible = False
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -331,6 +335,18 @@ def host_peer():
 
                 random.seed(seed)
                 state = CONNECTED
+
+            elif msg_type == MSG_SPECTATOR_REQUEST:
+                if not prompt_visible:
+                    print("message_type:", end="", flush=True)
+                    prompt_visible = True
+
+                SPECTATORS.add(addr)
+
+                response = {"message_type": MSG_SPECTATOR_WELCOME}
+                send_with_retry(sock, addr, response)
+
+                print(f" SPECTATOR_WELCOME to {addr}")
     finally:
         sock.close()
         print("Host socket closed.")
@@ -388,6 +404,68 @@ def spectator_peer(host_ip):
     # TODO: Implement
     # Temporary placeholder so spectator in main cleanly exits
     print("Spectator mode is not yet implemented.")
+    return
+
+    state = SETUP
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(TIMEOUT)
+    host_addr = (host_ip, PORT)
+
+    print("Searching for host as a Spectator...")
+
+    try: 
+        # Discovery (same idea as joiner, but more simple)
+        host_found = False
+        attempts = 0
+        while attempts < MAX_RETRIES and not host_found:
+            send_with_retry(sock, host_addr, {"message_type": MSG_DISCOVER_HOST})
+            msg, addr = receive_with_ack(sock)
+
+            if msg and msg.get("message_type") == MSG_DISCOVER_ACK:
+                print("Host Found ...")
+                print(f"Host IP : {addr[0]}")
+                print(f"Host Broadcast Port: {addr[1]}")
+                print(f"({addr[0]}, {addr[1]})")
+                host_found = True
+                break
+
+            attempts += 1
+            if attempts < MAX_RETRIES:
+                print("(Waiting for Host)")
+                time.sleep(WAIT_FOR_HOST_DELAY)
+            
+        if not host_found:
+            print("No active host found. Exiting spectator mode.")
+            return
+        
+        # Specattor Request
+        print("Sending specattor request...")
+        ok = send_with_retry(sock, host_addr, {"message_type": MSG_SPECTATOR_REQUEST})
+        if not ok:
+            print("Failed to send spectator request reliably. Exiting.")
+            return
+
+        # Wait for welcome/confirmatino
+        while state == SETUP:
+            msg, addr = receive_with_ack(sock)
+            if not msg:
+                continue
+
+            if msg.get("message_type") == MSG_SPECTATOR_WELCOME:
+                print("Connected as a spectator! Listening for messages...\n")
+                state = CONNECTED
+                break
+                
+            if state != CONNECTED:
+                print("Could not complete spectatore handshake. Exiting.")
+                return
+            
+            # TODO: Main spectator loop (displaying messages)
+            # while True:
+
+    finally:
+        sock.close()
+        print("Spectator socket closed.")
 
 # ------------------------
 # MAIN WRAPPER & ENTRY POINT
