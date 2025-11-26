@@ -9,7 +9,7 @@ import csv
 # ------------------------
 # Configuration
 # ------------------------
-HOST_IP = "10.102.185.44" # Change to your local IP address
+HOST_IP = "10.210.163.215" # Change to your local IP address
 PORT = 5005
 BUFFER_SIZE = 4096
 TIMEOUT = 0.5
@@ -218,70 +218,171 @@ def send_chat_message(sock, addr, text=None, sticker_b64=None):
 def handle_incoming_chat(msg):
     pass
 
-# ------------------------
-# BATTLE SETUP PHASE (4.4)
-# ------------------------
-def battle_setup_phase(sock, peer_addr, battle_state):
-    global POKEMON_DATA
-    mode_input = input("communication_mode [P2P/BROADCAST] (default P2P): ").strip().upper()
-    if mode_input not in ("P2P", "BROADCAST"):
-        communication_mode = "P2P"
-    else:
-        communication_mode = mode_input
+def run_battle_loop(sock, peer_addr, battle_state):
+    """Placeholder for the main battle execution logic."""
+    print("--- Starting Battle Loop ---")
+    # In a full implementation, this function would handle turn sequencing,
+    # attack/defense announcements, calculation reports, and Game Over conditions.
+    # For now, we exit immediately.
+    pass
 
-    # 2) Ask for Pokémon name and validate from CSV
-    while True:
-        name = input("Enter your Pokémon name: ").strip()
-        row = get_pokemon(name, POKEMON_DATA)
-        if row:
-            break
-        print("Pokémon not found in CSV, try again.")
+# Assuming the following helpers/constants exist from the wider context:
+# - MSG_BATTLE_SETUP = "BATTLE_SETUP"
+# - MSG_BATTLE_SETUP_ACK = "BATTLE_SETUP_ACK"
+# - POKEMON_DATA (or similar source for set_pokemon_data)
+# - send_message(sock, addr, msg)
+# - receive_message(sock)
+# - build_pokemon_battle_data(row)
+# - get_pokemon(name, data)
 
-    # 3) Build our local Pokémon data + boosts
-    self_pokemon = build_pokemon_battle_data(row)
-    self_boosts = {"special_attack_uses": 5, "special_defense_uses": 5}
+def battle_setup_phase(sock, peer_addr, battle_state, initiator: bool):
+    """
+    Battle setup phase.
 
-    # Store in BattleState (local)
-    battle_state.self_pokemon = self_pokemon
-    battle_state.self_boosts = self_boosts
+    - If initiator=True (e.g. host):
+        1) Ask for local battle info, send BATTLE_SETUP.
+        2) Wait for opponent's BATTLE_SETUP, then display it.
 
-    # 4) Send our BATTLE_SETUP to the peer
-    msg = {
-        "message_type": MSG_BATTLE_SETUP,
-        "communication_mode": communication_mode,
-        "pokemon_name": self_pokemon["name"],
-        "stat_boosts": json.dumps(self_boosts),
-        "pokemon": json.dumps(self_pokemon)
-    }
+    - If initiator=False (e.g. joiner):
+        1) Wait for opponent's BATTLE_SETUP, display it immediately.
+        2) Then ask user for message_type + battle setup info,
+           send our own BATTLE_SETUP.
+    """
 
-    # IMPORTANT: use plain send_message, not send_with_retry, to keep this clean
-    send_message(sock, peer_addr, msg)
-    print("Sent BATTLE_SETUP. Waiting for opponent setup...")
+    # ---------------- Initiator branch (host) ----------------
+    if initiator:
+        # 1) Select communication mode
+        while True:
+            mode_input = input("communication_mode [P2P/BROADCAST]: ").strip().upper()
+            if mode_input in ("P2P", "BROADCAST"):
+                communication_mode = mode_input
+                break
+            print("Invalid communication mode. Please enter either P2P or BROADCAST.\n")
 
-    # 5) Wait for opponent's BATTLE_SETUP
-    while True:
-        incoming, addr = receive_message(sock)
-        if not incoming:
-            continue
+        # 2) Ask for Pokémon name
+        while True:
+            name = input("pokemon_name: ").strip()
+            row = get_pokemon(name, POKEMON_DATA)
+            if row is not None:
+                break
+            print("Pokémon not found in CSV, try again.\n")
 
-        if incoming.get("message_type") == MSG_BATTLE_SETUP:
-            try:
-                opp_name = incoming["pokemon_name"]
-                opp_pokemon = json.loads(incoming["pokemon"])
-                opp_boosts = json.loads(incoming["stat_boosts"])
-            except (KeyError, json.JSONDecodeError):
-                print("[ERROR] Invalid BATTLE_SETUP received, waiting again...")
+        # 3) Build Pokémon & stat boosts
+        self_pokemon = build_pokemon_battle_data(row)
+        self_boosts = {"special_attack_uses": 5, "special_defense_uses": 5}
+
+        battle_state.self_pokemon = self_pokemon
+        battle_state.self_boosts = self_boosts
+
+        # 4) Send our BATTLE_SETUP
+        msg = {
+            "message_type": MSG_BATTLE_SETUP,
+            "communication_mode": communication_mode,
+            "pokemon_name": self_pokemon["name"],
+            "stat_boosts": self_boosts,
+            "pokemon": self_pokemon,
+        }
+
+        send_message(sock, peer_addr, msg)
+        print(f"stat_boosts : {self_boosts}")
+        print("Waiting for opponent setup...")
+
+        # 5) Wait for opponent BATTLE_SETUP
+        while True:
+            incoming, addr = receive_with_ack(sock)
+            if not incoming:
                 continue
 
-            battle_state.opponent_pokemon = opp_pokemon
-            battle_state.opponent_boosts = opp_boosts
-            print(f"Opponent selected: {opp_name}")
-            print(f"communication_mode: {incoming.get('communication_mode')}")
-            return True
-        else:
-            # Ignore anything that isn't BATTLE_SETUP during this phase
-            print("[BATTLE_SETUP] Ignoring non-BATTLE_SETUP message:", incoming)
+            if incoming.get("message_type") == MSG_BATTLE_SETUP:
+                opponent_pokemon_name = incoming["pokemon_name"]
+                comm_mode = incoming["communication_mode"]
+                opp_boosts = incoming.get("stat_boosts", {})
 
+                battle_state.opponent_pokemon = incoming.get("pokemon", {})
+                battle_state.opponent_boosts = opp_boosts
+
+                print("\n---------------------------- BATTLE SETUP ----------------------------")
+                print("message_type: BATTLE_SETUP (Opponent)")
+                print(f"communication_mode: {comm_mode}")
+                print(f"pokemon_name: {opponent_pokemon_name}")
+                print(f"stat_boosts: {opp_boosts}")
+                print("----------------------------------------------------------------------\n")
+                return True
+
+            # Ignore anything else during setup
+            print(f"[BATTLE_SETUP initiator] Ignoring unexpected message type: {incoming.get('message_type')}")
+
+    # ---------------- Responder branch (joiner) ----------------
+    else:
+        # 1) Wait for opponent BATTLE_SETUP first
+        print("Waiting for opponent battle setup...")
+        while True:
+            incoming, addr = receive_with_ack(sock)
+            if not incoming:
+                continue
+
+            if incoming.get("message_type") == MSG_BATTLE_SETUP:
+                opponent_pokemon_name = incoming["pokemon_name"]
+                comm_mode = incoming["communication_mode"]
+                opp_boosts = incoming.get("stat_boosts", {})
+
+                battle_state.opponent_pokemon = incoming.get("pokemon", {})
+                battle_state.opponent_boosts = opp_boosts
+
+                # Immediately display opponent's setup
+                print("\n---------------------------- BATTLE SETUP ----------------------------")
+                print("message_type: BATTLE_SETUP (Opponent)")
+                print(f"communication_mode: {comm_mode}")
+                print(f"pokemon_name: {opponent_pokemon_name}")
+                print(f"stat_boosts: {opp_boosts}")
+                print("----------------------------------------------------------------------\n")
+                break
+
+            print(f"[BATTLE_SETUP responder] Ignoring unexpected message type: {incoming.get('message_type')}")
+
+        # 2) Now ask for our own message_type and battle setup info
+        while True:
+            user_msg_type = input("message_type: ").strip()
+            if user_msg_type == MSG_BATTLE_SETUP:
+                break
+            print("Invalid input. You must type BATTLE_SETUP\n")
+
+        # 3) Select communication mode
+        while True:
+            mode_input = input("communication_mode [P2P/BROADCAST]: ").strip().upper()
+            if mode_input in ("P2P", "BROADCAST"):
+                communication_mode = mode_input
+                break
+            print("Invalid communication mode. Please enter either P2P or BROADCAST.\n")
+
+        # 4) Ask for Pokémon name
+        while True:
+            name = input("pokemon_name: ").strip()
+            row = get_pokemon(name, POKEMON_DATA)
+            if row is not None:
+                break
+            print("Pokémon not found in CSV, try again.\n")
+
+        # 5) Build our Pokémon & stat boosts
+        self_pokemon = build_pokemon_battle_data(row)
+        self_boosts = {"special_attack_uses": 5, "special_defense_uses": 5}
+
+        battle_state.self_pokemon = self_pokemon
+        battle_state.self_boosts = self_boosts
+
+        msg = {
+            "message_type": MSG_BATTLE_SETUP,
+            "communication_mode": communication_mode,
+            "pokemon_name": self_pokemon["name"],
+            "stat_boosts": self_boosts,
+            "pokemon": self_pokemon,
+        }
+
+        send_message(sock, peer_addr, msg)
+        print(f"stat_boosts : {self_boosts}")
+        print("Your battle setup sent to opponent.")
+        return True
+            
 # ------------------------
 # HOST / JOINER / SPECTATOR
 # ------------------------
@@ -340,7 +441,8 @@ def host_peer():
                 state = BATTLE_SETUP
                 battle_state.state = BATTLE_SETUP
 
-                if not battle_setup_phase(sock, peer_addr, battle_state):
+                # Host is the initiator of battle setup
+                if not battle_setup_phase(sock, peer_addr, battle_state, initiator=True):
                     print("[ERROR] Battle setup failed.")
                     return
 
@@ -414,28 +516,22 @@ def joiner_peer(host_ip):
             if state != CONNECTED:
                 print("Handshake failed, try again.")
 
-        # 3) AFTER HANDSHAKE, REQUIRE BATTLE_SETUP INPUT
+        # 3) AFTER HANDSHAKE, JOINER WAITS FOR HOST'S BATTLE_SETUP FIRST
         if state == CONNECTED:
-            while state == CONNECTED:
-                user_input = input("message_type: ").strip()
-                if user_input != MSG_BATTLE_SETUP:
-                    print("Invalid input. You must type BATTLE_SETUP\n")
-                    continue
+            # Joiner is the responder in battle setup
+            state = BATTLE_SETUP
+            battle_state.state = BATTLE_SETUP
 
-                state = BATTLE_SETUP
-                battle_state.state = BATTLE_SETUP
+            if not battle_setup_phase(sock, host_addr, battle_state, initiator=False):
+                print("[ERROR] Battle setup failed.")
+                return
 
-                if not battle_setup_phase(sock, host_addr, battle_state):
-                    print("[ERROR] Battle setup failed.")
-                    return
+            print("Battle setup complete. Waiting for move...")
+            battle_state.state = WAITING_FOR_MOVE
+            state = WAITING_FOR_MOVE
 
-                print("Battle setup complete. Waiting for move...")
-                battle_state.state = WAITING_FOR_MOVE
-                state = WAITING_FOR_MOVE
-
-                # 4) Enter battle loop
-                run_battle_loop(sock, host_addr, battle_state)
-                break
+            # 4) Enter battle loop
+            run_battle_loop(sock, host_addr, battle_state)
 
     finally:
         sock.close()
