@@ -1,13 +1,15 @@
 import socket
-import csv
+import json
 import random
 import time
 from collections import deque
+import csv
 
+#LAST CODE WITH INA NUNG MONDAY GOKS (PENDING PROGRESS BATTLE_SETUP)
 # ------------------------
 # Configuration
 # ------------------------
-HOST_IP = "172.20.10.3"
+HOST_IP = "10.159.62.24"
 PORT = 5005
 BUFFER_SIZE = 4096
 TIMEOUT = 0.5
@@ -27,8 +29,6 @@ MSG_DISCOVER_HOST = "DISCOVER_HOST"
 MSG_DISCOVER_ACK = "DISCOVER_ACK"
 MSG_HANDSHAKE_REQUEST = "HANDSHAKE_REQUEST"
 MSG_HANDSHAKE_RESPONSE = "HANDSHAKE_RESPONSE"
-MSG_SPECTATOR_REQUEST = "SPECTATOR_REQUEST"
-MSG_SPECTATOR_WELCOME = "SPECTATOR_WELCOME"
 MSG_ATTACK_ANNOUNCE = "ATTACK_ANNOUNCE"
 MSG_DEFENSE_ANNOUNCE = "DEFENSE_ANNOUNCE"
 MSG_CALCULATION_REPORT = "CALCULATION_REPORT"
@@ -37,15 +37,11 @@ MSG_RESOLUTION_REQUEST = "RESOLUTION_REQUEST"
 MSG_GAME_OVER = "GAME_OVER"
 MSG_CHAT = "CHAT_MESSAGE"
 MSG_ACK = "ACK"
-
-# Globals
-current_seq = 0         # Sequence counter for incoming messages
-POKEMON_DATA = None     # Cached CSV
-SPECTATORS = set()      # (ip, port) pairs of connected spectators
-
+MSG_BATTLE_SETUP = "BATTLE_SETUP"
 
 # Buffered incoming messages captured while waiting for ACKs
 _pending_messages = deque()
+POKEMON_DATA = {}
 
 # ------------------------
 # UDP UTILITIES
@@ -67,19 +63,13 @@ def receive_message(sock):
 # PROTOCOL HELPERS (RFC style)
 # ------------------------
 def encode_protocol_message(msg_dict):
-    # Convert a dict into RFC-style 'key: value' lines, separated by newlines.
-    # Example:
-    #     {"message_type": "DISCOVER_HOST"} ->
-    #     "message_type: DISCOVER_HOST\\n"
     lines = []
     for k, v in msg_dict.items():
         lines.append(f"{k}: {v}")
     text = "\n".join(lines) + "\n"
-    return text.encode()  # bytes for sendto()
-
+    return text.encode()
 
 def decode_protocol_message(raw_bytes):
-    # Convert RFC-style 'key: value' lines back into a dict (all values as strings).
     text = raw_bytes.decode()
     result = {}
     for line in text.splitlines():
@@ -96,6 +86,7 @@ def decode_protocol_message(raw_bytes):
 # ------------------------
 # RELIABILITY HELPERS
 # ------------------------
+current_seq = 0  # Global sequence counter for outgoing messages
 
 def get_next_seq():
     global current_seq
@@ -103,12 +94,9 @@ def get_next_seq():
     return current_seq
 
 def _buffer_incoming(msg, addr):
-    """Store incoming message for later processing."""
     _pending_messages.append((msg, addr))
 
-
 def _next_incoming(sock):
-    """Return buffered message if available, else read from socket."""
     if _pending_messages:
         return _pending_messages.popleft()
     return receive_message(sock)
@@ -118,7 +106,7 @@ def _next_incoming(sock):
 # ------------------------
 def send_with_retry(sock, addr, message, max_retries=MAX_RETRIES, timeout=TIMEOUT):
     # Add sequence number to message
-    seq = get_next_seq()
+    seq = random.randint(1, 9999999)
     message = message.copy()
     message["sequence_number"] = seq
 
@@ -132,7 +120,7 @@ def send_with_retry(sock, addr, message, max_retries=MAX_RETRIES, timeout=TIMEOU
                 continue
 
             # ACK received
-            if msg.get("message_type") == MSG_ACK and str(seq) == msg.get("ack_number", -1):
+            if msg.get("message_type") == MSG_ACK and str(seq) == msg.get("ack_number"):
                 return True
 
             # If the message contains its own sequence_number, ACK it
@@ -141,6 +129,7 @@ def send_with_retry(sock, addr, message, max_retries=MAX_RETRIES, timeout=TIMEOU
                 send_message(sock, sender, ack)
 
         # retry
+    print(f"[ERROR] No ACK for seq {seq} after {max_retries} retries.")
     return False
 
 def receive_with_ack(sock):
@@ -154,132 +143,69 @@ def receive_with_ack(sock):
 # POKEMON DATA
 # ------------------------
 def load_pokemon_data(csv_path="pokemon.csv"):
-    # TODO: Load Pokemon stats from CSV into a suitable structure.
-    # Returns:
-    # dict[str, dict]: e.g. data["bulbasaur"] -> {
-    #     "name": "Bulbasaur",
-    #     "hp": 45,
-    #     "attack": 49,
-    #     "defense": 49,
-    #     "sp_attack": 65,
-    #     "sp_defense": 65,
-    #     "speed": 45,
-    #     "type1": "grass",
-    #     "type2": "poison" or None,
-    # }
-    global POKEMON_DATA 
     data = {}
-
-    with open(csv_path, newline="", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            name = (row.get("name") or "").strip()
-            if not name:
-                continue
-
-            def parse_int(key, default=0):
-                try:
-                    return int(float(row.get(key, default))) # values are strings in the csv and could be returned as "67.0"
-                except (ValueError, TypeError):
-                    return default
-            
-            effectiveness_cols = [
-                "against_bug", "against_dark", "against_dragon",
-                "against_electric", "against_fairy", "against_fight",
-                "against_fire", "against_flying", "against_ghost",
-                "against_grass", "against_ground", "against_ice",
-                "against_normal", "against_poison", "against_psychic",
-                "against_rock", "against_steel", "against_water",
-            ]
-
-            entry = {
-                "name": name,
-                "hp": parse_int("hp"),
-                "attack": parse_int("attack"),
-                "defense": parse_int("defense"),
-                "sp_attack": parse_int("sp_attack"),
-                "sp_defense": parse_int("sp_defense"),
-                "speed": parse_int("speed"),
-                "type1": (row.get("type1") or "").strip() or None,
-                "type2": (row.get("type2") or "").strip() or None,
-            }
-
-            # add all against_* multipliers
-            for col in effectiveness_cols:
-                raw = row.get(col, "1")
-                
-            try:
-                entry[col] = float(raw)
-            except (TypeError, ValueError):
-                entry[col] = 1.0
-
-            data[name.lower()] = entry
-    
-    POKEMON_DATA = data
+    try:
+        with open(csv_path, newline="", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                name = row.get("name", "").strip()
+                if not name:
+                    continue
+                data[name.lower()] = row
+    except FileNotFoundError:
+        print("[ERROR] pokemon.csv not found in current directory.")
     return data
 
-
 def get_pokemon(name, data):
-    # Look up a Pokemon by name
-    # return data.get(name)
     if not name:
         return None
-    
-    # if no data passed, fall back to global cache
-    global POKEMON_DATA
-    if data is None:
-        if POKEMON_DATA is None:
-            POKEMON_DATA = load_pokemon_data()
-        data = POKEMON_DATA
-    
-    return data.get(name.strip().lower())
+    return data.get(name.lower())
+
+def build_pokemon_battle_data(row):
+    def as_int(key, default=0):
+        try:
+            return int(float(row.get(key, default)))
+        except ValueError:
+            return default
+    return {
+        "name": row.get("name", ""),
+        "hp": as_int("hp"),
+        "attack": as_int("attack"),
+        "defense": as_int("defense"),
+        "sp_attack": as_int("sp_attack"),
+        "sp_defense": as_int("sp_defense"),
+        "speed": as_int("speed"),
+        "type1": row.get("type1", ""),
+        "type2": row.get("type2", "") or "",
+        "pokedex_number": as_int("pokedex_number")
+    }
     
 # ------------------------
 # BATTLE STATE & DAMAGE MODEL SKELETON
 # ------------------------
 class BattleState:
-    # TODO: Represent the full battle state (Pokemon, HP, whose turn, etc.)
-
     def __init__(self):
-        # placeholder attribute/s
-        # fill in later (e.g. host_poke, joiner_probe, hp, etc.)
         self.example = None
+        self.state = SETUP
+        self.self_pokemon = None
+        self.opponent_pokemon = None
+        self.self_boosts = None
+        self.opponent_boosts = None
 
     def is_game_over(self):
-        # TODO: Return True/False and winner info.
         return False
 
-def get_type_effectiveness(move_type: str, defender_stats: dict) -> float:
-    # Looks up how effective this move's type is against the defender
-    # using the aganist_[type] coloumns from pokemon.csv
-    # TODO: Nalilito po ako sa against_{type} fields sa csv
-    # maybe inaantok lang. This function is NOT final and subject to change
-    col_name = f"against_{move_type.lower()}"
-    raw = defender_stats.get(col_name, "1")
-
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return 1.0
 
 def calculate_damage(attacker_stats, defender_stats, move_info):
-    # TODO: Implement damage as per RFC
     pass
 
 # ------------------------
 # TURN FLOW SKELETON
 # ------------------------
 def run_turn_as_attacker(sock, peer_addr, battle_state):
-    # TODO: Implement the 4-step turn as attacker:
-    #     1. ATTACK_ANNOUNCE
-    #     2. DEFENSE_ANNOUNCE
-    #     3. CALCULATION_REPORT
-    #     4. CALCULATION_CONFIRM / RESOLUTION_REQUEST
     pass
 
-
 def run_turn_as_defender(sock, peer_addr, battle_state):
-    # TODO: Implement the 4-step turn as defender
     pass
 
 
@@ -287,21 +213,70 @@ def run_turn_as_defender(sock, peer_addr, battle_state):
 # CHAT SKELETON: Text + Stickers
 # ------------------------
 def send_chat_message(sock, addr, text=None, sticker_b64=None):
-    # TODO: Implement chat messages on top of the protocol
     pass
 
 def handle_incoming_chat(msg):
-    # TODO: Handle and display incoming chat message (text/sticker)
     pass
 
+# ------------------------
+# BATTLE SETUP PHASE (4.4)
+# ------------------------
+def battle_setup_phase(sock, peer_addr, battle_state):
+    global POKEMON_DATA
+    while True:
+        name = input("Enter your Pokémon name: ").strip()
+        row = get_pokemon(name, POKEMON_DATA)
+        if row:
+            break
+        print("Pokémon not found in CSV, try again.")
 
+    self_pokemon = build_pokemon_battle_data(row)
+    self_boosts = {"special_attack_uses": 5, "special_defense_uses": 5}
+    battle_state.self_pokemon = self_pokemon
+    battle_state.self_boosts = self_boosts
+
+    msg = {
+        "message_type": MSG_BATTLE_SETUP,
+        "communication_mode": "P2P",
+        "pokemon_name": self_pokemon["name"],
+        "stat_boosts": json.dumps(self_boosts),
+        "pokemon": json.dumps(self_pokemon)
+    }
+
+    if not send_with_retry(sock, peer_addr, msg):
+        print("[ERROR] Failed to send BATTLE_SETUP.")
+        return False
+
+    print("Sent BATTLE_SETUP. Waiting for opponent setup...")
+
+    while True:
+        incoming, addr = receive_with_ack(sock)
+        if not incoming:
+            continue
+        if incoming.get("message_type") == MSG_BATTLE_SETUP:
+            try:
+                opp_name = incoming["pokemon_name"]
+                opp_pokemon = json.loads(incoming["pokemon"])
+                opp_boosts = json.loads(incoming["stat_boosts"])
+            except (KeyError, json.JSONDecodeError):
+                print("[ERROR] Invalid BATTLE_SETUP received, waiting again...")
+                continue
+
+            battle_state.opponent_pokemon = opp_pokemon
+            battle_state.opponent_boosts = opp_boosts
+            print(f"Opponent selected: {opp_name}")
+            return True
+
+# ------------------------
+# HOST / JOINER / SPECTATOR
+# ------------------------
 def host_peer():
-    global SPECTATORS
     state = SETUP
     prompt_visible = False
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((HOST_IP, PORT))
     sock.settimeout(TIMEOUT)
+    battle_state = BattleState()
     print("Searching for host...")
 
     try:
@@ -334,19 +309,16 @@ def host_peer():
                 print(f"seed: {seed}")
 
                 random.seed(seed)
-                state = CONNECTED
+                state = BATTLE_SETUP
+                battle_state.state = BATTLE_SETUP
 
-            elif msg_type == MSG_SPECTATOR_REQUEST:
-                if not prompt_visible:
-                    print("message_type:", end="", flush=True)
-                    prompt_visible = True
+                if not battle_setup_phase(sock, addr, battle_state):
+                    return
 
-                SPECTATORS.add(addr)
-
-                response = {"message_type": MSG_SPECTATOR_WELCOME}
-                send_with_retry(sock, addr, response)
-
-                print(f" SPECTATOR_WELCOME to {addr}")
+                print("Battle setup complete. Waiting for move...")
+                battle_state.state = WAITING_FOR_MOVE
+                state = WAITING_FOR_MOVE
+                return
     finally:
         sock.close()
         print("Host socket closed.")
@@ -356,10 +328,11 @@ def joiner_peer(host_ip):
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.settimeout(TIMEOUT)
     host_addr = (host_ip, PORT)
+    battle_state = BattleState()
     print("Searching for host...")
 
     try:
-        # Keep trying indefinitely until host responds
+        # Keep trying until host responds (bounded by MAX_RETRIES)
         host_found = False
         attempts = 0
         while attempts < MAX_RETRIES and not host_found:
@@ -393,7 +366,16 @@ def joiner_peer(host_ip):
                     random.seed(seed)
                     print("message_type: HANDSHAKE_RESPONSE")
                     print(f"seed: {seed}")
-                    state = CONNECTED
+                    state = BATTLE_SETUP
+                    battle_state.state = BATTLE_SETUP
+
+                    if not battle_setup_phase(sock, host_addr, battle_state):
+                        return
+
+                    print("Battle setup complete. Waiting for move...")
+                    battle_state.state = WAITING_FOR_MOVE
+                    state = WAITING_FOR_MOVE
+                    return
                 else:
                     print("No response from host, retrying handshake...")
     finally:
@@ -401,88 +383,25 @@ def joiner_peer(host_ip):
         print("Joiner socket closed.")
 
 def spectator_peer(host_ip):
-    # TODO: Implement
-    # Temporary placeholder so spectator in main cleanly exits
     print("Spectator mode is not yet implemented.")
-    return
-
-    state = SETUP
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(TIMEOUT)
-    host_addr = (host_ip, PORT)
-
-    print("Searching for host as a Spectator...")
-
-    try: 
-        # Discovery (same idea as joiner, but more simple)
-        host_found = False
-        attempts = 0
-        while attempts < MAX_RETRIES and not host_found:
-            send_with_retry(sock, host_addr, {"message_type": MSG_DISCOVER_HOST})
-            msg, addr = receive_with_ack(sock)
-
-            if msg and msg.get("message_type") == MSG_DISCOVER_ACK:
-                print("Host Found ...")
-                print(f"Host IP : {addr[0]}")
-                print(f"Host Broadcast Port: {addr[1]}")
-                print(f"({addr[0]}, {addr[1]})")
-                host_found = True
-                break
-
-            attempts += 1
-            if attempts < MAX_RETRIES:
-                print("(Waiting for Host)")
-                time.sleep(WAIT_FOR_HOST_DELAY)
-            
-        if not host_found:
-            print("No active host found. Exiting spectator mode.")
-            return
-        
-        # Specattor Request
-        print("Sending specattor request...")
-        ok = send_with_retry(sock, host_addr, {"message_type": MSG_SPECTATOR_REQUEST})
-        if not ok:
-            print("Failed to send spectator request reliably. Exiting.")
-            return
-
-        # Wait for welcome/confirmatino
-        while state == SETUP:
-            msg, addr = receive_with_ack(sock)
-            if not msg:
-                continue
-
-            if msg.get("message_type") == MSG_SPECTATOR_WELCOME:
-                print("Connected as a spectator! Listening for messages...\n")
-                state = CONNECTED
-                break
-                
-            if state != CONNECTED:
-                print("Could not complete spectatore handshake. Exiting.")
-                return
-            
-            # TODO: Main spectator loop (displaying messages)
-            # while True:
-
-    finally:
-        sock.close()
-        print("Spectator socket closed.")
 
 # ------------------------
 # MAIN WRAPPER & ENTRY POINT
 # ------------------------
 def main():
-    print("Welcome to P2P Pokemon Battle Protocol")
+    global POKEMON_DATA
+    POKEMON_DATA = load_pokemon_data()
+    print("Welcome to P2P Pokémon Battle Protocol")
     while True:
         role = input("Enter your role [Host, Joiner, Spectator]: ").strip().lower()
         if role == "host":
             host_peer()
             break
         elif role == "joiner":
-            joiner_peer(HOST_IP) # Temporary (?)
+            joiner_peer(HOST_IP)
             break
         elif role == "spectator":
-            # spectator_peer(HOST_IP)
-            pass  # leave empty for now
+            spectator_peer(HOST_IP)
             break
         else:
             print("Invalid role. Choose Host, Joiner, or Spectator.\n")
