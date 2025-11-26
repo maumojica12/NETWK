@@ -9,7 +9,7 @@ import csv
 # ------------------------
 # Configuration
 # ------------------------
-HOST_IP = "10.159.62.24"
+HOST_IP = "10.102.185.44" # Change to your local IP address
 PORT = 5005
 BUFFER_SIZE = 4096
 TIMEOUT = 0.5
@@ -223,6 +223,13 @@ def handle_incoming_chat(msg):
 # ------------------------
 def battle_setup_phase(sock, peer_addr, battle_state):
     global POKEMON_DATA
+    mode_input = input("communication_mode [P2P/BROADCAST] (default P2P): ").strip().upper()
+    if mode_input not in ("P2P", "BROADCAST"):
+        communication_mode = "P2P"
+    else:
+        communication_mode = mode_input
+
+    # 2) Ask for Pokémon name and validate from CSV
     while True:
         name = input("Enter your Pokémon name: ").strip()
         row = get_pokemon(name, POKEMON_DATA)
@@ -230,29 +237,33 @@ def battle_setup_phase(sock, peer_addr, battle_state):
             break
         print("Pokémon not found in CSV, try again.")
 
+    # 3) Build our local Pokémon data + boosts
     self_pokemon = build_pokemon_battle_data(row)
     self_boosts = {"special_attack_uses": 5, "special_defense_uses": 5}
+
+    # Store in BattleState (local)
     battle_state.self_pokemon = self_pokemon
     battle_state.self_boosts = self_boosts
 
+    # 4) Send our BATTLE_SETUP to the peer
     msg = {
         "message_type": MSG_BATTLE_SETUP,
-        "communication_mode": "P2P",
+        "communication_mode": communication_mode,
         "pokemon_name": self_pokemon["name"],
         "stat_boosts": json.dumps(self_boosts),
         "pokemon": json.dumps(self_pokemon)
     }
 
-    if not send_with_retry(sock, peer_addr, msg):
-        print("[ERROR] Failed to send BATTLE_SETUP.")
-        return False
-
+    # IMPORTANT: use plain send_message, not send_with_retry, to keep this clean
+    send_message(sock, peer_addr, msg)
     print("Sent BATTLE_SETUP. Waiting for opponent setup...")
 
+    # 5) Wait for opponent's BATTLE_SETUP
     while True:
-        incoming, addr = receive_with_ack(sock)
+        incoming, addr = receive_message(sock)
         if not incoming:
             continue
+
         if incoming.get("message_type") == MSG_BATTLE_SETUP:
             try:
                 opp_name = incoming["pokemon_name"]
@@ -265,7 +276,11 @@ def battle_setup_phase(sock, peer_addr, battle_state):
             battle_state.opponent_pokemon = opp_pokemon
             battle_state.opponent_boosts = opp_boosts
             print(f"Opponent selected: {opp_name}")
+            print(f"communication_mode: {incoming.get('communication_mode')}")
             return True
+        else:
+            # Ignore anything that isn't BATTLE_SETUP during this phase
+            print("[BATTLE_SETUP] Ignoring non-BATTLE_SETUP message:", incoming)
 
 # ------------------------
 # HOST / JOINER / SPECTATOR
@@ -276,8 +291,11 @@ def host_peer():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((HOST_IP, PORT))
     sock.settimeout(TIMEOUT)
+
     battle_state = BattleState()
-    print("Searching for host...")
+    print("Host is active. Waiting for joiner...")
+    seed = None
+    peer_addr = None
 
     try:
         while state == SETUP:
@@ -302,23 +320,37 @@ def host_peer():
 
                 seed = random.randint(0, 100000)
                 response = {"message_type": MSG_HANDSHAKE_RESPONSE, "seed": seed}
-
-                send_with_retry(sock, addr, response)
+                send_message(sock, addr, response)
 
                 print(f" {MSG_HANDSHAKE_RESPONSE}")
                 print(f"seed: {seed}")
 
                 random.seed(seed)
+                peer_addr = addr
+                state = CONNECTED
+                battle_state.state = CONNECTED
+
+        if state == CONNECTED and peer_addr is not None:
+            while state == CONNECTED:
+                user_input = input("message_type: ").strip()
+                if user_input != MSG_BATTLE_SETUP:
+                    print("Invalid input. You must type BATTLE_SETUP\n")
+                    continue
+
                 state = BATTLE_SETUP
                 battle_state.state = BATTLE_SETUP
 
-                if not battle_setup_phase(sock, addr, battle_state):
+                if not battle_setup_phase(sock, peer_addr, battle_state):
+                    print("[ERROR] Battle setup failed.")
                     return
 
                 print("Battle setup complete. Waiting for move...")
                 battle_state.state = WAITING_FOR_MOVE
                 state = WAITING_FOR_MOVE
-                return
+
+                # 3) Enter battle loop
+                run_battle_loop(sock, peer_addr, battle_state)
+                break
     finally:
         sock.close()
         print("Host socket closed.")
@@ -330,6 +362,8 @@ def joiner_peer(host_ip):
     host_addr = (host_ip, PORT)
     battle_state = BattleState()
     print("Searching for host...")
+    seed = None
+
 
     try:
         # Keep trying until host responds (bounded by MAX_RETRIES)
@@ -358,26 +392,51 @@ def joiner_peer(host_ip):
             if user_input != MSG_HANDSHAKE_REQUEST:
                 print("Invalid input\n")
                 continue
+            send_message(sock, host_addr, {"message_type": MSG_HANDSHAKE_REQUEST})
 
-            if send_with_retry(sock, host_addr, {"message_type": MSG_HANDSHAKE_REQUEST}):
-                msg, _ = receive_with_ack(sock)
+            retries = 0
+            while retries < MAX_RETRIES:
+                msg, _ = receive_message(sock)
                 if msg and msg.get("message_type") == MSG_HANDSHAKE_RESPONSE:
                     seed = int(msg["seed"])
                     random.seed(seed)
                     print("message_type: HANDSHAKE_RESPONSE")
                     print(f"seed: {seed}")
-                    state = BATTLE_SETUP
-                    battle_state.state = BATTLE_SETUP
-
-                    if not battle_setup_phase(sock, host_addr, battle_state):
-                        return
-
-                    print("Battle setup complete. Waiting for move...")
-                    battle_state.state = WAITING_FOR_MOVE
-                    state = WAITING_FOR_MOVE
-                    return
+                    state = CONNECTED
+                    battle_state.state = CONNECTED
+                    break
                 else:
-                    print("No response from host, retrying handshake...")
+                    retries += 1
+                    if retries < MAX_RETRIES:
+                        print("No response from host, retrying handshake...")
+                        send_message(sock, host_addr, {"message_type": MSG_HANDSHAKE_REQUEST})
+
+            if state != CONNECTED:
+                print("Handshake failed, try again.")
+
+        # 3) AFTER HANDSHAKE, REQUIRE BATTLE_SETUP INPUT
+        if state == CONNECTED:
+            while state == CONNECTED:
+                user_input = input("message_type: ").strip()
+                if user_input != MSG_BATTLE_SETUP:
+                    print("Invalid input. You must type BATTLE_SETUP\n")
+                    continue
+
+                state = BATTLE_SETUP
+                battle_state.state = BATTLE_SETUP
+
+                if not battle_setup_phase(sock, host_addr, battle_state):
+                    print("[ERROR] Battle setup failed.")
+                    return
+
+                print("Battle setup complete. Waiting for move...")
+                battle_state.state = WAITING_FOR_MOVE
+                state = WAITING_FOR_MOVE
+
+                # 4) Enter battle loop
+                run_battle_loop(sock, host_addr, battle_state)
+                break
+
     finally:
         sock.close()
         print("Joiner socket closed.")
