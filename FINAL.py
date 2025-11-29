@@ -230,7 +230,7 @@ def listen_for_host():
     listen_sock.bind(('', BROADCAST_PORT))
     listen_sock.settimeout(5)
 
-    info_message("  Searching for host ...")
+    ##info_message("  Searching for host ...")
 
     try:
         while True:
@@ -258,34 +258,36 @@ def listen_for_host():
 
 def set_pokemon_data(pokemon_name, user):   
 
-    row = pokemon_df.loc[pokemon_df["name"] == pokemon_name].iloc[0].to_dict()
+    global my_data, opponent_data
 
-    if(user == 1):
-        global my_data
-        my_data = {
-            "hp": row['hp'],
-            "attack": row['attack'],
-            "defense": row['defense'],
-            "special attack": row['sp_attack'],
-            "special defense": row['sp_defense'],
-            "speed": row['speed'],
-            "type_1": row['type1'],
-            "type_2": row['type2'],
-            "row" : row
-        }
-    elif (user == 2):
-        global opponent_data
-        opponent_data = {
-            "hp": row['hp'],
-            "attack": row['attack'],
-            "defense": row['defense'],
-            "special attack": row['sp_attack'],
-            "special defense": row['sp_defense'],
-            "speed": row['speed'],
-            "type_1": row['type1'],
-            "type_2": row['type2'],
-            "row" : row
-        }
+    name_clean = pokemon_name.strip().lower()
+
+    pokemon_df["name_clean"] = pokemon_df["name"].astype(str).str.strip().str.lower()
+
+    match = pokemon_df.loc[pokemon_df["name_clean"] == name_clean]
+
+    if match.empty:
+        error_message(f" Pokémon '{pokemon_name}' not found in dataset!")
+        return None
+
+    row = match.iloc[0].to_dict()   
+
+    stats = {
+        "hp": row['hp'],
+        "attack": row['attack'],
+        "defense": row['defense'],
+        "special attack": row['sp_attack'],
+        "special defense": row['sp_defense'],
+        "speed": row['speed'],
+        "type_1": row['type1'],
+        "type_2": row['type2'],
+        "row": row
+    }
+
+    if user == 1:
+        my_data = stats
+    else:
+        opponent_data = stats
     
 def receive_messages():
     while True:
