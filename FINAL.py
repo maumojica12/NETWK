@@ -72,7 +72,7 @@ BGREEN = f"{POKE_GREEN}{BOLD}===================================================
 BPURP = f"{POKE_PURPLE}{BOLD}======================================================================={RESET}"
 BYELLOW = f"{POKE_YELLOW}{BOLD}======================================================================={RESET}"
 
-pokemon_moves = [
+pokemoves = [
     {"name": "Flare Blitz", "category": "Physical", "type": "Fire", "power": 60},
     {"name": "Blaze Kick", "category": "Physical", "type": "Fire", "power": 42},
     {"name": "Flamethrower", "category": "Special", "type": "Fire", "power": 45},
@@ -576,8 +576,8 @@ def check_activity(message):
     
 def validate_move(move_name):
     global sp_count
-    # Check if move exists in pokemon_moves
-    move = next((m for m in pokemon_moves if m["name"].lower() == move_name.lower()), None)
+    # Check if move exists in pokemoves
+    move = next((m for m in pokemoves if m["name"].lower() == move_name.lower()), None)
     if not move:
         return False
 
@@ -982,7 +982,7 @@ def process_activity(activity, message, addr):
             ack_received = True
 
 def get_move(move_name):
-    for move in pokemon_moves:
+    for move in pokemoves:
         if move["name"].lower() == move_name.lower():
             return move
     return None 
