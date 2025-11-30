@@ -31,7 +31,7 @@ RESET = "\033[0m"
 
 PORT = 5432
 BROADCAST_PORT = 5217
-BUFFER_SIZE = 4096
+BUFFER_SIZE = 65535 # max size of a udp packet
 MAX_RETRIES = 3
 MAX_SP_USES = 5
 SESSION_ACTIVE = True
@@ -973,7 +973,14 @@ def process_activity(activity, message, addr):
         display_message_above_prompt(f"  message_type: CHAT_MESSAGE", POKE_YELLOW)
         display_message_above_prompt(f"  sender_name: {message["sender_name"]}", POKE_YELLOW)
         display_message_above_prompt(f"  content_type: {message["content_type"]}", POKE_YELLOW)
-        display_message_above_prompt(f"  message_text: {message["message_text"]}", POKE_YELLOW)
+
+        if message['content_type'] == "TEXT":
+            display_message_above_prompt(f"  message_text: {message['message_text']}", POKE_YELLOW)
+        elif message['content_type'] == "STICKER":
+            raw_data = message['sticker_data']
+            preview = raw_data[:50] + "..." if len(raw_data) > 50 else raw_data
+            display_message_above_prompt(f"  sticker_data: {preview}", POKE_YELLOW)
+
         display_message_above_prompt(f"  sequence_number: {message['sequence_number']}", POKE_YELLOW)
         display_message_above_prompt(BYELLOW)
 
