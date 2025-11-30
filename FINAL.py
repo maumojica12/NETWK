@@ -228,7 +228,17 @@ def broadcast_presence_host():
             break # Socket probably closed while thread is still looping
         time.sleep(3)
 
-def listen_for_host():
+
+def listen_for_host(max_retries=3, search_interval=1.0, enable_logs=False):
+    """
+    Listens for a host broadcasting 'ACTIVE' messages and sets peer_addr.
+    
+    Args:
+        max_retries (int): Number of attempts before giving up.
+        search_interval (float): Delay between attempts.
+        enable_logs (bool): If True, prints internal debug logs.
+    """
+
     global SESSION_ACTIVE
     global peer_addr
 
@@ -237,30 +247,70 @@ def listen_for_host():
     listen_sock.bind(('', BROADCAST_PORT))
     listen_sock.settimeout(5)
 
-    ##info_message("  Searching for host ...")
+    def log(msg):
+        if enable_logs:
+            print(f"{POKE_GRAY}[DEBUG] {msg}{RESET}")
+
+    log("Socket created and bound to broadcast port.")
+
+    retry_count = 0
+    found_host = False
+
+    print(f"{POKE_BLUE}{BOLD}  Searching for host...{RESET}")
 
     try:
-        while True:
-            data, addr = listen_sock.recvfrom(BUFFER_SIZE)
-            message_dict = json.loads(data.decode())
-            ip, port = addr
+        while retry_count < max_retries:
+            try:
+                data, sender_addr = listen_sock.recvfrom(BUFFER_SIZE)
+                log(f"Packet received from {sender_addr}")
 
-            if message_dict["message_type"] == "ACTIVE":
-                success_message(f"  Host Found ... Host IP: {ip} Host Broadcast Port: {BROADCAST_PORT}")
+            except socket.timeout:
+                retry_count += 1
+                log(f"Timeout occurred. Attempt {retry_count}/{max_retries}")
+                print(f"{POKE_YELLOW}  No host detected... retrying ({retry_count}/{max_retries}){RESET}")
+                time.sleep(search_interval)
+                continue
 
-                if my_role in ["Peer", "Spectator"]:
-                    peer_addr = tuple(message_dict["host_addr"])
-                    info_message(peer_addr)
+            # Attempt to parse JSON
+            try:
+                msg = json.loads(data.decode())
+                log(f"Decoded JSON: {msg}")
+            except json.JSONDecodeError:
+                log("Received malformed JSON broadcast. Ignoring.")
+                continue
+
+            # Check for ACTIVE host broadcast
+            if msg.get("message_type") == "ACTIVE":
+                host_ip, _ = sender_addr
+                success_message(
+                    f"  Host Found! IP: {host_ip} | Broadcast Port: {BROADCAST_PORT}"
+                )
+
+                # Joiner or Spectator stores host address
+                if my_role in ["Joiner", "Spectator"]:
+                    peer_addr = tuple(msg.get("host_addr", (None, None)))
+                    info_message(f"  Host Address: {peer_addr}")
+
+                found_host = True
                 break
 
-    except socket.timeout:
-        SESSION_ACTIVE = False
+            else:
+                log("Received broadcast that was not ACTIVE type.")
 
-        if my_role != "Host":
-            print("  No Host Found, Program Terminating ...")
+    finally:
+        listen_sock.close()
 
-    listen_sock.close()
     print(f"{BORDER}")
+
+    # Final status handling
+    if not found_host:
+        SESSION_ACTIVE = False
+        if my_role != "Host":
+            error_message("  No Host Found after all attempts. Program Terminating...")
+        return None
+
+    return peer_addr
+
 
 
 def set_pokemon_data(pokemon_name, user):   
