@@ -296,23 +296,6 @@ def listen_for_host():
     print(f"{BORDER}")
 
 
-def validate_comm_mode(mode):
-
-    valid_modes = ["P2P", "BROADCAST"]
-
-    if mode is None:
-        error_message("  Communication mode cannot be empty.")
-        return False
-
-    mode_clean = mode.strip().upper()
-
-    if mode_clean not in valid_modes:
-        error_message("  Invalid communication mode! Must be either P2P or Broadcast.")
-        return False
-
-    return mode_clean
-
-
 
 def set_pokemon_data(pokemon_name, user):   
 
@@ -1179,12 +1162,17 @@ while SESSION_ACTIVE:
 
     if message_type == "BATTLE_SETUP":
         while True:
-            comm_input = input(prompt_label("communication_mode [P2P/Broadcast]: "))
-            comm_validated = validate_comm_mode(comm_input)
-            if comm_validated:
-                break
+            comm_input = input(prompt_label("communication_mode [P2P/Broadcast]: ")).strip()
             
-        comm_input = comm_validated  # normalized (P2P or BROADCAST)
+            # Normalize
+            comm_upper = comm_input.upper()
+
+            # Validate
+            if comm_upper in ["P2P", "BROADCAST"]:
+                comm_input = comm_upper   # store normalized version
+                break
+            else:
+                error_message("  Invalid communication mode! Please enter P2P or Broadcast.")
 
 
         while True:
