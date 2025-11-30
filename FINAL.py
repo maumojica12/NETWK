@@ -37,6 +37,8 @@ MAX_SP_USES = 5
 SESSION_ACTIVE = True
 BROADCAST_ACTIVE = True
 
+broadcast_sock = None
+
 pokemon_df = None
 peer_addr = None
 my_role = None
@@ -211,7 +213,7 @@ def display_message_above_prompt(message, color=RESET):
     sys.stdout.flush()
 
 def broadcast_presence_host():
-    global BROADCAST_ACTIVE
+    global BROADCAST_ACTIVE, broadcast_sock
     
     broadcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     broadcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -219,8 +221,11 @@ def broadcast_presence_host():
     broadcast_message_dict = {"message_type" : "ACTIVE", "host_addr" : (socket.gethostbyname(socket.gethostname()), PORT)}
     broadcast_message = json.dumps(broadcast_message_dict)
 
-    while BROADCAST_ACTIVE: 
-        broadcast_sock.sendto(broadcast_message.encode(), ('255.255.255.255', BROADCAST_PORT))
+    while BROADCAST_ACTIVE:
+        try:
+            broadcast_sock.sendto(broadcast_message.encode(), ('255.255.255.255', BROADCAST_PORT))
+        except OSError:
+            break # Socket probably closed while thread is still looping
         time.sleep(3)
 
 def listen_for_host():
@@ -1061,12 +1066,22 @@ def get_pokemon(name, data):
     return data.get(name.strip().lower())
 
 def close_socket():
-    my_socket.close()
+    global BROADCAST_ACTIVE, broadcast_sock
 
-    if my_role == "Host":
-        broadcast_sock.close() # Not defined in function scope (?)
-    
+    BROADCAST_ACTIVE = False
+    try:
+        my_socket.close()
+    except Exception:
+        pass
 
+    # close broadcast socket if we are Host and it exists
+    if my_role == "Host" and broadcast_sock is not None:
+        try:
+            broadcast_sock.close()
+        except Exception:
+            pass
+        broadcast_sock = None
+        
 # Main Program
 try:
     pokemon_df = pd.read_csv("pokemon.csv")
