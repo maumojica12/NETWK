@@ -1,14 +1,7 @@
 # P2P Pokemon Battle Application (PokeProtocol over UDP)
 
 This project is a console-based peer-to-peer Pokemon battle application built in Python.  
-It implements the core ideas of the [PokeProtocol RFC](RFC%20PokeProtocol.pdf) over **UDP**, including:
-
-- Host / Joiner (Peer) / Spectator roles
-- Pokemon selection and basic move system
-- Turn-based battle flow with damage calculation
-- Simple reliability layer on top of UDP (sequence numbers + ACKs)
-- In-battle chat (TEXT and STICKER messages)
-- Broadcast-style spectator mode
+It implements the core ideas of the [PokeProtocol RFC](RFC%20PokeProtocol.pdf) over **UDP**.
 
 The application uses the [pokemon.csv](pokemon.csv) dataset provided by our professor to look up Pokemon stats and type effectiveness.
 
@@ -22,6 +15,23 @@ The application uses the [pokemon.csv](pokemon.csv) dataset provided by our prof
   ```bash
   pip install -r requirements.txt
   ```
+
+---
+
+## Task Matrix / Group Continbutions
+**Group Members:** Chiu, Helaga, Mojica, Ramirez
+| Task Area         | Description                                                         | Member Assigned |
+|-------------------|---------------------------------------------------------------------|-----------------|
+| Protocol Design   | Mapped RFC to message types and states                              |                 |
+| Networking (UDP)  | Socket setup, host/peer flow, ports, broadcast                      |                 |
+| Reliability Layer | Sequence numbers, ACKs, retries, timeout logic                      |                 |
+| Data Handling     | Loading [pokemon.csv](pokemon.csv), name matching, type multipliers |                 |
+| Battle Logic      | Move list, damage formula, turn flow, HP updates                    |                 |
+| Chat (Text)       | CHAT_MESSAGE structure, player chat display                         |                 |
+| Chat (Stickers)   | File validation, base64 encoding, sticker display                   |                 |
+| Spectator Mode    | Handling of SPECTATOR_REQUEST, broadcasting to spectators           |                 |
+| Documentation     | Writing README, instructions, task matrix                           |                 |
+| Review            | Refactoring                                                         |                 |
 
 ---
 
