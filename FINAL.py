@@ -4,8 +4,10 @@ import json
 import time
 import sys
 import os
+import base64
 import random
 import pandas as pd
+from PIL import Image 
 
 POKE_RED = "\033[38;2;255;75;75m"
 POKE_BLUE = "\033[38;2;56;126;255m"
@@ -1062,7 +1064,7 @@ def close_socket():
     my_socket.close()
 
     if my_role == "Host":
-        broadcast_sock.close()
+        broadcast_sock.close() # Not defined in function scope (?)
     
 
 # Main Program
@@ -1158,27 +1160,59 @@ while SESSION_ACTIVE:
     elif message_type == "CHAT_MESSAGE":
         print(f"{POKE_YELLOW}sender_name: {my_name}{RESET}")  
 
-        content_input = input(prompt_label("content_type: "))
+        # ask for TEXT o STICKER and force uppercase + validate
+        while True:
+            content_input = input(prompt_label("content_type (TEXT/STICKER): ")).strip().upper()
+            if content_input in ("TEXT", "STICKER"):
+                break
+            display_message_above_prompt("  Invalid content type! Please enter TEXT or STICKER.")
 
-        if content_input == "TEXT": # IMPLEMENT STICKER FEATURE 
+        if content_input == "TEXT":
             msg_input = input(prompt_label("message_text: "))
             send_message = {
                 "message_type" : message_type, 
                 "sender_name" : my_name, 
-                "content_type" : content_input, 
+                "content_type" : "TEXT", 
                 "message_text" : msg_input
             }
-        elif content_input == "STICKER": # BUGGY PA
-            sticker_file = input(prompt_label("sticker_file_path: "))
-            with open(sticker_file, "rb") as f:
-                import base64
-                sticker_data = base64.b64encode(f.read()).decode()
-            
+        else:
+            sticker_data = None
+
+            while sticker_data is None:
+                sticker_file = input(prompt_label("sticker_file_path: ")).strip().strip('"')
+
+                if not os.path.isfile(sticker_file):
+                    display_message_above_prompt("  File not found. Please enter a valid path.")
+                    continue
+
+                # < 10 MB as per RFC
+                file_size = os.path.getsize(sticker_file)
+                if file_size > 10 * 1024 * 1024:
+                    display_message_above_prompt("  Sticker must be <= 10MB. Please choose a smaller file.")
+                    continue
+
+                # Optional: check dimensions 320x320 if Pillow is installed
+                try:
+                    with Image.open(sticker_file) as img:
+                        width, height = img.size
+                    if width != 320 or height != 320:
+                        display_message_above_prompt("  Sticker must be exactly 320x320px. Please choose another image.")
+                        continue
+                except ImportError:
+                    display_message_above_prompt("  (Warning: Pillow not installed, skipping dimension check)")
+
+                try:
+                    with open(sticker_file, "rb") as f:
+                        sticker_data = base64.b64encode(f.read()).decode()
+                except Exception as e:
+                    display_message_above_prompt(f"  Error reading sticker file: {e}")
+                    sticker_data = None
+
             send_message = {
-                "message_type" : message_type,
-                "sender_name" : my_name,
-                "content_type" : content_input,
-                "sticker_data" : sticker_data
+                "message_type": message_type,
+                "sender_name": my_name,
+                "content_type": "STICKER",
+                "sticker_data": sticker_data
             }
 
     else: 
