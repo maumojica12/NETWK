@@ -265,6 +265,27 @@ def create_socket():
             my_name = "Spectator"
         success_message(f"  {my_role} socket initialized.")
 
+def configure_ports_for_role():
+    global PORT, BROADCAST_PORT
+
+    # Simple validator
+    def ask_port(prompt_text, default_value):
+        while True:
+            raw = input(prompt_label(f"{prompt_text} [default {default_value}]: ")).strip()
+            if raw == "":
+                return default_value
+            if raw.isdigit():
+                value = int(raw)
+                if 1 <= value <= 65535:
+                    return value
+            error_message("  Invalid port number. Please enter an integer 1–65535.")
+
+    if my_role == "Host":
+        PORT = ask_port("  Enter battle port for this Host", PORT)
+        BROADCAST_PORT = ask_port("  Enter broadcast port for lobby discovery", BROADCAST_PORT)
+    else:  # Peer or Spectator
+        BROADCAST_PORT = ask_port("  Enter broadcast port to search for Host", BROADCAST_PORT)
+
 
 def display_message_above_prompt(message, color=RESET):
     sys.stdout.write('\r\033[K')
@@ -1263,6 +1284,7 @@ pokemon_data = {
 }
 
 welcome_message()
+configure_ports_for_role() 
 create_socket()
 
 if my_role == "Host":
