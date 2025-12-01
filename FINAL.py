@@ -1224,33 +1224,33 @@ def calculate_damage(is_attacker = True):
     damage_result = dict_stats
     return dict_stats
 
-def build_calculation_confirm(seq): 
-    return {
-        "message_type": "CALCULATION_CONFIRM",
-        "sequence_number": seq
-    }
+# def build_calculation_confirm(seq): 
+#     return {
+#         "message_type": "CALCULATION_CONFIRM",
+#         "sequence_number": seq
+#     }
 
-def send_calculation_confirm(sock, seq): 
-    msg = build_calculation_confirm(seq)
-    encoded = json.dumps(msg).encode()
-    sock.sendall(encoded)
-    print(f"[SENT] CALCULATION_CONFIRM (seq={seq})")
+# def send_calculation_confirm(sock, seq): 
+#     msg = build_calculation_confirm(seq)
+#     encoded = json.dumps(msg).encode()
+#     sock.sendall(encoded)
+#     print(f"[SENT] CALCULATION_CONFIRM (seq={seq})")
 
-def build_resolution_request(attacker, move_used, damage_dealt, defender_hp_remaining, seq): 
-    return {
-        "message_type": "RESOLUTION_REQUEST",
-        "attacker": attacker,
-        "move_used": move_used,
-        "damage_dealt": damage_dealt,
-        "defender_hp_remaining": defender_hp_remaining,
-        "sequence_number": seq
-    }
+# def build_resolution_request(attacker, move_used, damage_dealt, defender_hp_remaining, seq): 
+#     return {
+#         "message_type": "RESOLUTION_REQUEST",
+#         "attacker": attacker,
+#         "move_used": move_used,
+#         "damage_dealt": damage_dealt,
+#         "defender_hp_remaining": defender_hp_remaining,
+#         "sequence_number": seq
+#     }
 
-def send_resolution_request(sock, attacker, move_used, damage_dealt, defender_hp_remaining, seq):
-    msg = build_resolution_request(attacker, move_used, damage_dealt, defender_hp_remaining, seq)
-    encoded = json.dumps(msg).encode()
-    sock.sendall(encoded)
-    print(f"[SENT] RESOLUTION_REQUEST (seq={seq})")
+# def send_resolution_request(sock, attacker, move_used, damage_dealt, defender_hp_remaining, seq):
+#     msg = build_resolution_request(attacker, move_used, damage_dealt, defender_hp_remaining, seq)
+#     encoded = json.dumps(msg).encode()
+#     sock.sendall(encoded)
+#     print(f"[SENT] RESOLUTION_REQUEST (seq={seq})")
 
 def get_pokemon(name, data):
     if not name:
