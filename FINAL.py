@@ -612,6 +612,7 @@ def display_spectator_message(message):
 
         time.sleep(10)
 
+        print("\n")
         print(BGREEN)
         title = "THANK YOU"
         inner_width = 70
@@ -740,6 +741,8 @@ def validate_move(move_name):
         return False
 
 def calculation_report():
+    global seq
+
     if last_move_name:
         damage_result = calculate_damage(is_attacker=True)
         attacker = my_pokemon
@@ -751,6 +754,8 @@ def calculation_report():
     else:
         error_message("Error: No attack move recorded. Cannot generate calculation report.")
         return
+    
+    seq += 1
 
     send_message = {
         "message_type" : "CALCULATION_REPORT",
@@ -766,8 +771,9 @@ def calculation_report():
     my_socket.sendto(encode_message(send_message), peer_addr) 
 
 def calculation_confirm():
-    global attacker, last_move_name, last_opponent_move, SESSION_ACTIVE, BROADCAST_ACTIVE, next_attacker
-
+    global attacker, last_move_name, last_opponent_move, SESSION_ACTIVE, BROADCAST_ACTIVE, next_attacker, seq
+    
+    seq += 1
     display_message_above_prompt("message_type: CALCULATION_CONFIRM")
     display_message_above_prompt(f"sequence_number: {seq}")
 
@@ -782,9 +788,10 @@ def calculation_confirm():
             winner = opponent_pokemon
             loser = my_pokemon
     
+        seq += 1
         message_type = "GAME_OVER"
-        display_message_above_prompt("message_type: ", message_type)
-        display_message_above_prompt("sequence_number: ", seq)
+        display_message_above_prompt(f"message_type: {message_type}")
+        display_message_above_prompt(f"sequence_number: {seq}")
         send_message = {
             "message_type": message_type,
             "winner": winner,
@@ -846,6 +853,7 @@ def resolution_request():
 
         time.sleep(3)
 
+        print("\n")
         print(BGREEN)
         title = "THANK YOU"
         inner_width = 70
@@ -965,7 +973,7 @@ def process_activity(activity, message, addr):
 
         seq += 1
         display_message_above_prompt("message_type: DEFENSE_ANNOUNCE")
-        display_message_above_prompt("sequence_number: ", seq)
+        display_message_above_prompt(f"sequence_number: {seq}")
         send_message = {
             "message_type" : "DEFENSE_ANNOUNCE",
             "sequence_number" : seq
@@ -1104,7 +1112,7 @@ def process_activity(activity, message, addr):
         seq = message['sequence_number']
 
         if (addr != peer_addr) and (comm_mode == "BROADCAST") and (my_role == "Host"): # Spectator's message should be broadcasted to spectators if comm_mode is BROADCAST
-            my_socket.sendto(encode_message(message).encode(), peer_addr)
+            my_socket.sendto(encode_message(message), peer_addr)
 
         display_message_above_prompt(BYELLOW)
         title = "CHAT MESSAGE"
@@ -1389,7 +1397,7 @@ while SESSION_ACTIVE:
 
         last_move_name = move_input
 
-        display_message_above_prompt("sequence_number: ", seq)
+        display_message_above_prompt(f"sequence_number: {seq}")
         send_message = {
             "message_type" : message_type, 
             "move_name" : move_input,
