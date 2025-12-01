@@ -418,8 +418,6 @@ def set_pokemon_data(pokemon_name, user):
 def receive_messages():
     while True:
         data, addr = my_socket.recvfrom(BUFFER_SIZE)
-        message = data.decode()
-
         message_dict = decode_message(data)
         mes = message_dict.get("message_type")
 
@@ -1232,7 +1230,7 @@ def build_calculation_confirm(seq):
 
 def send_calculation_confirm(sock, seq): 
     msg = build_calculation_confirm(seq)
-    encoded = json.dumps(msg).encode()
+    encoded = encode_message(msg)
     sock.sendall(encoded)
     print(f"[SENT] CALCULATION_CONFIRM (seq={seq})")
 
@@ -1248,7 +1246,7 @@ def build_resolution_request(attacker, move_used, damage_dealt, defender_hp_rema
 
 def send_resolution_request(sock, attacker, move_used, damage_dealt, defender_hp_remaining, seq):
     msg = build_resolution_request(attacker, move_used, damage_dealt, defender_hp_remaining, seq)
-    encoded = json.dumps(msg).encode()
+    encoded = encode_message(msg)
     sock.sendall(encoded)
     print(f"[SENT] RESOLUTION_REQUEST (seq={seq})")
 
