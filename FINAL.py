@@ -7,6 +7,7 @@ import os
 import base64
 import random
 import pandas as pd
+import re
 from PIL import Image 
 
 POKE_RED = "\033[38;2;255;75;75m"
@@ -131,6 +132,64 @@ pokemoves = [
     {"name": "Hyper Voice", "category": "Special", "type": "Normal", "power": 45},
 ]
 
+def encode_message(msg: dict) -> bytes:
+    """
+    Convert a dict into RFC 'key: value' newline-separated text.
+    Example:
+        {"message_type": "ATTACK_ANNOUNCE", "sequence_number": 5}
+    becomes:
+        b"message_type: ATTACK_ANNOUNCE\nsequence_number: 5"
+    """
+    lines = []
+    for key, value in msg.items():
+        lines.append(f"{key}: {value}")
+    text = "\n".join(lines)
+    return text.encode("utf-8")
+
+
+_int_pattern = re.compile(r"-?\d+$")
+
+def _parse_value(value: str):
+    """
+    Try to parse ints (for sequence_number, ack_number, etc.).
+    Everything else stays as string.
+    """
+    v = value.strip()
+    if _int_pattern.fullmatch(v):
+        try:
+            return int(v)
+        except ValueError:
+            return v
+    return v
+
+
+def decode_message(data: bytes) -> dict:
+    """
+    Parse RFC 'key: value' lines into a dict.
+    Example:
+        b"message_type: ATTACK_ANNOUNCE\nsequence_number: 5"
+    becomes:
+        {"message_type": "ATTACK_ANNOUNCE", "sequence_number": 5}
+    """
+    text = data.decode("utf-8").strip()
+    result = {}
+    if not text:
+        return result
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if ":" not in line:
+            continue  # or log an error if you want
+
+        key, value = line.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        result[key] = _parse_value(value)
+
+    return result
+
 def clear_line():
     sys.stdout.write('\r\033[K')
     sys.stdout.flush()
@@ -220,14 +279,15 @@ def broadcast_presence_host():
     broadcast_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     broadcast_sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
-    broadcast_message_dict = {"message_type" : "ACTIVE", "host_addr" : (socket.gethostbyname(socket.gethostname()), PORT)}
-    broadcast_message = json.dumps(broadcast_message_dict)
+    host_ip = socket.gethostbyname(socket.gethostname())
+    broadcast_message_dict = {"message_type": "ACTIVE", "host_ip": host_ip, "host_port": PORT,}
+    wire = encode_message(broadcast_message_dict)
 
     while BROADCAST_ACTIVE:
         try:
-            broadcast_sock.sendto(broadcast_message.encode(), ('255.255.255.255', BROADCAST_PORT))
+            broadcast_sock.sendto(wire, ('255.255.255.255', BROADCAST_PORT))
         except OSError:
-            break # Socket probably closed while thread is still looping
+            break  # Socket probably closed while thread is still looping
         time.sleep(3)
 
 
@@ -242,7 +302,7 @@ def host_received():
     try:
         while True:
             data, addr = listen_sock.recvfrom(BUFFER_SIZE)
-            message_dict = json.loads(data.decode())
+            message_dict = decode_message(data)
 
             if message_dict.get("message_type") == "ACTIVE":
                 success_message(f"  Joiner detected at {addr}")
@@ -274,14 +334,16 @@ def listen_for_host():
     while retries < 3:
         try:
             data, addr = listen_sock.recvfrom(BUFFER_SIZE)
-            message_dict = json.loads(data.decode())
-            ip, port = addr
+            message_dict = decode_message(data)
+            ip, port = addr     # From UDP
 
             if message_dict.get("message_type") == "ACTIVE":
-                success_message(f"  Host Found ... Host IP: {ip}")
+                # Prefer the host_ip/host_port fields from the message, fall back to UDP addr
+                host_ip = message_dict.get("host_ip", ip)
+                host_port = message_dict.get("host_port", port)
 
-                # Save tuple("ip", portNumber)
-                peer_addr = tuple(message_dict["host_addr"])
+                success_message(f"  Host Found ... Host IP: {host_ip}")
+                peer_addr = (host_ip, host_port)
                 info_message(f"  Connected to Host: {peer_addr}")
                 break
 
@@ -337,9 +399,8 @@ def receive_messages():
         data, addr = my_socket.recvfrom(BUFFER_SIZE)
         message = data.decode()
 
-        message_dict = json.loads(message)
-
-        mes = message_dict["message_type"]
+        message_dict = decode_message(data)
+        mes = message_dict.get("message_type")
 
         # ack every message that has a seq number (except ACKs themselves)
         if mes != "ACK" and "sequence_number" in message_dict:
@@ -357,7 +418,7 @@ def receive_messages():
             "CHAT_MESSAGE",
             "GAME_OVER",
         ]:
-            send_to_spectators(message, False)
+            send_to_spectators(message_dict, False)
         
         activity = check_activity(message_dict)
         process_activity(activity, message_dict, addr)
@@ -375,21 +436,18 @@ def spectator_messages():
     
     while True:
         data, addr = my_socket.recvfrom(BUFFER_SIZE)
-        message = data.decode()
 
         try:
-            message_dict = json.loads(message)
+            message_dict = decode_message(data)
 
-            if message_dict["message_type"] == "SPECTATOR_ADMITTED":
-                my_name = message_dict["name"]
-                seq = message_dict["sequence_number"]
-            elif (message_dict["message_type"] == "ACK") and (seq != 0):
-                if message_dict["ack_number"] == seq:
+            if message_dict.get("message_type") == "SPECTATOR_ADMITTED":
+                my_name = message_dict.get("name", my_name)
+                seq = message_dict.get("sequence_number", seq)
+            elif message_dict.get("message_type") == "ACK" and seq != 0:
+                if message_dict.get("ack_number") == seq:
                     ack_received = True
 
             display_spectator_message(message_dict)
-        except json.JSONDecodeError:
-            print(f"{POKE_RED}[ERROR]{RESET} Invalid message format received.")
         except Exception as e:
             print(f"{POKE_RED}[ERROR]{RESET} processing message: {e}")
 
@@ -597,18 +655,18 @@ def display_spectator_message(message):
         display_message_above_prompt(BPINK)
 
     
-def send_to_spectators(message, from_host):
+def send_to_spectators(message_dict, from_host):
+    mes = dict(message_dict)
+
     if from_host:
-        mes = json.loads(message)
-        mes["sender"] = "Player 1"
-        mes = json.dumps(mes)
+        mes["sender_name"] = "Player1"
     else:
-        mes = json.loads(message)
-        mes["sender"] = "Player 2"
-        mes = json.dumps(mes)
+        mes["sender_name"] = "Player2"
+
+    wire = encode_message(mes)
 
     for addr in spectators:
-        my_socket.sendto(mes.encode(), addr)
+        my_socket.sendto(wire, addr)
 
 def check_activity(message): 
     if message["message_type"] == "HANDSHAKE_REQUEST":
@@ -686,7 +744,7 @@ def calculation_report():
         "sequence_number" : seq
     }
 
-    my_socket.sendto(json.dumps(send_message).encode(), peer_addr) 
+    my_socket.sendto(encode_message(send_message), peer_addr) 
 
 def calculation_confirm():
     global attacker, last_move_name, last_opponent_move, SESSION_ACTIVE, BROADCAST_ACTIVE, next_attacker
@@ -695,7 +753,7 @@ def calculation_confirm():
     display_message_above_prompt(f"sequence_number: {seq}")
 
     send_message = {"message_type" : "CALCULATION_CONFIRM", "sequence_number" : seq}
-    my_socket.sendto(json.dumps(send_message).encode(), peer_addr)
+    my_socket.sendto(encode_message(send_message), peer_addr)
 
     if opponent_data["hp"] <= 0 or my_data["hp"] <= 0:
         if opponent_data["hp"] <= 0:
@@ -715,7 +773,7 @@ def calculation_confirm():
             "sequence_number" : seq
         }
 
-        my_socket.sendto(json.dumps(send_message).encode(), peer_addr)
+        my_socket.sendto(encode_message(send_message), peer_addr)
  
     else:
         if last_move_name:
@@ -748,7 +806,7 @@ def resolution_request():
     count = 0
 
     if resolution == False and count == 0:
-        my_socket.sendto(json.dumps(send_message).encode(), peer_addr) 
+        my_socket.sendto(encode_message(send_message), peer_addr) 
         count += 1
         time.sleep(0.5)
 
@@ -896,7 +954,7 @@ def process_activity(activity, message, addr):
             "sequence_number" : seq
         }
 
-        my_socket.sendto(json.dumps(send_message).encode(), peer_addr)
+        my_socket.sendto(encode_message(send_message), peer_addr)
         calculation_report()
 
     elif activity == 6: 
@@ -986,7 +1044,7 @@ def process_activity(activity, message, addr):
         seq += 1
         if int(message["defender_hp_remaining"]) == int(opponent_data["hp"]):
             send_message = {"message_type" : "CALCULATION_CONFIRM", "sequence_number" : seq}
-            my_socket.sendto(json.dumps(send_message).encode(), peer_addr)
+            my_socket.sendto(encode_message(send_message), peer_addr)
 
     elif activity == 10: 
         seq = message['sequence_number']
@@ -1397,12 +1455,12 @@ while SESSION_ACTIVE:
             send_message["sequence_number"] = seq
 
             if comm_mode == "BROADCAST" and my_role == "Host":
-                send_to_spectators(json.dumps(send_message), True)
+                send_to_spectators(send_message, True)
 
         if (my_role == "Spectator") and (seq == 0):
             ack_received = True
 
-        my_socket.sendto(json.dumps(send_message).encode(), peer_addr)
+        my_socket.sendto(encode_message(send_message), peer_addr)
         message_sent_count += 1
         time.sleep(0.5)
 
