@@ -394,6 +394,51 @@ def spectator_messages():
             print(f"{POKE_RED}[ERROR]{RESET} processing message: {e}")
 
 def display_spectator_message(message):
+    msg_type = message.get("message_type")
+
+    if msg_type == "ACK":
+        return # don't show ACKs to spectators
+    
+    if msg_type == "SPECTATOR_ADMITTED":
+        seq = message.get("sequence_number", "")
+        name = message.get("name", "Unknown")
+
+        display_message_above_prompt(BPINK)
+        title = "SPECTATOR ADMITTED"
+        inner_width = 70
+        centered_title = title.center(inner_width)
+        centered_title = " " + centered_title.rstrip()
+        display_message_above_prompt(f"{POKE_PINK}{BOLD}{centered_title}{RESET}")
+        display_message_above_prompt(BPINK)
+        display_message_above_prompt(f"  message_type: SPECTATOR_ADMITTED", POKE_PINK)
+        display_message_above_prompt(f"  name: {name}", POKE_PINK)
+        display_message_above_prompt(f"  sequence_number: {seq}", POKE_PINK)
+        display_message_above_prompt(BPINK)
+        return
+    
+    if msg_type == "BATTLE_SETUP":
+        seq = message.get("sequence_number", "")
+        comm = message.get("communication_mode", "")
+        name = message.get("pokemon_name", "")
+        boosts = message.get("stat_boosts", "")
+        sender = message.get("sender_name", message.get("sender", "Unknown"))
+
+        display_message_above_prompt(BPINK)
+        title = "BATTLE SETUP"
+        inner_width = 70
+        centered_title = title.center(inner_width)
+        centered_title = " " + centered_title.rstrip()
+        display_message_above_prompt(f"{POKE_PINK}{BOLD}{centered_title}{RESET}")
+        display_message_above_prompt(BPINK)
+        display_message_above_prompt(f"  message_type: {msg_type}", POKE_PINK)
+        display_message_above_prompt(f"  communication_mode: {comm}", POKE_PINK)
+        display_message_above_prompt(f"  pokemon_name: {name}", POKE_PINK)
+        display_message_above_prompt(f"  stat_boosts: {boosts}", POKE_PINK)
+        display_message_above_prompt(f"  sender: {sender}", POKE_PINK)
+        display_message_above_prompt(f"  sequence_number: {seq}", POKE_PINK)
+        display_message_above_prompt(BPINK)
+        return
+    
     if message["message_type"] == "ATTACK_ANNOUNCE":
         seq = message['sequence_number']
         display_message_above_prompt(BRED)
@@ -540,11 +585,15 @@ def display_spectator_message(message):
         display_message_above_prompt(BPINK)
         title = "SPECTATOR MESSAGE"
         inner_width = 70
-        centered_title = (" " + title.center(inner_width)).rstrip()
+        centered_title = title.center(inner_width)
+        centered_title = " " + centered_title.rstrip()
         display_message_above_prompt(f"{POKE_PINK}{BOLD}{centered_title}{RESET}")
         display_message_above_prompt(BPINK)
-        display_message_above_prompt(f"  [SPECTATOR] Received {message} message", POKE_PINK)
-        display_message_above_prompt(f"Content: {message}", POKE_PINK)
+        display_message_above_prompt(f"  [SPECTATOR] Received {msg_type} message", POKE_PINK)
+
+        for k, v in message.items():
+            display_message_above_prompt(f"  {k}: {v}", POKE_PINK)
+
         display_message_above_prompt(BPINK)
 
     
