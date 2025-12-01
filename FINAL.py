@@ -5,7 +5,6 @@ import time
 import sys
 import os
 import base64
-import random
 import pandas as pd
 from PIL import Image 
 
@@ -339,18 +338,30 @@ def receive_messages():
 
         mes = message_dict["message_type"]
 
-        if not mes in ["ACK", "DEFENSE_ANNOUNCE", "CALCULATION_REPORT", "CALCULATION_CONFIRM", "RESOLUTION_REQUEST"]:
+        # ack every message that has a seq number (except ACKs themselves)
+        if mes != "ACK" and "sequence_number" in message_dict:
             send_ack(message_dict, addr)
-            if comm_mode == "BROADCAST" and my_role == "Host" and mes in ["ATTACK_ANNOUNCE", "DEFENSE_ANNOUNCE", "CALCULATION_REPORT", "CALCULATION_CONFIRM", "RESOLUTION_REQUEST", "RESOLUTION_CONFIRM", "CHAT_MESSAGE", "GAME_OVER"]:
-                send_to_spectators(message, False)
-    
+
+        # forward tarffic to specattors if we're Host in braodcast mode
+        if comm_mode == "BROADCAST" and my_role == "Host" and mes in [
+            "ATTACK_ANNOUNCE",
+            "DEFENSE_ANNOUNCE",
+            "CALCULATION_REPORT",
+            "CALCULATION_CONFIRM",
+            "RESOLUTION_REQUEST",
+            "RESOLUTION_CONFIRM",
+            "CHAT_MESSAGE",
+            "GAME_OVER",
+        ]:
+            send_to_spectators(message, False)
+        
         activity = check_activity(message_dict)
         process_activity(activity, message_dict, addr)
 
 def send_ack(message, addr):
     send_message = json.dumps({
         "message_type" : "ACK",
-        "ACK" : message["sequence_number"]
+        "ack_number" : message["sequence_number"]
         })
 
     my_socket.sendto(send_message.encode(), addr)
@@ -369,7 +380,7 @@ def spectator_messages():
                 my_name = message_dict["name"]
                 seq = message_dict["sequence_number"]
             elif (message_dict["message_type"] == "ACK") and (seq != 0):
-                if message_dict["ACK"] == seq:
+                if message_dict["ack_number"] == seq:
                     ack_received = True
 
             display_spectator_message(message_dict)
@@ -985,7 +996,7 @@ def process_activity(activity, message, addr):
         display_message_above_prompt(BYELLOW)
 
     elif activity == 12: 
-        if seq == message["ACK"]:
+        if seq == message["ack_number"]:
             ack_received = True
 
 def get_move(move_name):
