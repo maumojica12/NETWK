@@ -445,12 +445,11 @@ def receive_messages():
         process_activity(activity, message_dict, addr)
 
 def send_ack(message, addr):
-    send_message = json.dumps({
-        "message_type" : "ACK",
-        "ack_number" : message["sequence_number"]
-        })
-
-    my_socket.sendto(send_message.encode(), addr)
+    send_message = {
+        "message_type": "ACK",
+        "ack_number": message["sequence_number"]
+    }
+    my_socket.sendto(encode_message(send_message), addr)
 
 def spectator_messages():
     global ack_received, my_name, seq
@@ -909,8 +908,7 @@ def process_activity(activity, message, addr):
         spectators.append(addr)
         seq += 1
         message_dict = {"message_type" : "SPECTATOR_ADMITTED","name" : "Spectator" + str(spectator_count), "sequence_number" : seq} # Not sure if needed to seed spectator
-        message = json.dumps(message_dict)
-        my_socket.sendto(message.encode(), addr)
+        my_socket.sendto(encode_message(message_dict), addr)
 
         display_message_above_prompt(BPINK)
         title = "SPECTATOR REQUEST"
@@ -1109,7 +1107,7 @@ def process_activity(activity, message, addr):
         seq = message['sequence_number']
 
         if (addr != peer_addr) and (comm_mode == "BROADCAST") and (my_role == "Host"): # Spectator's message should be broadcasted to spectators if comm_mode is BROADCAST
-            my_socket.sendto(json.dumps(message).encode(), peer_addr)
+            my_socket.sendto(encode_message(message).encode(), peer_addr)
 
         display_message_above_prompt(BYELLOW)
         title = "CHAT MESSAGE"
