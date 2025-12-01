@@ -5,6 +5,7 @@ import time
 import sys
 import os
 import base64
+import random
 import pandas as pd
 from PIL import Image 
 
@@ -61,6 +62,8 @@ res_count = 0
 sp_count = 0
 seq = 0
 ack_received = None
+
+seed = None
 
 BORDER = f"{POKE_ORANGE}{BOLD}======================================================================={RESET}"
 BGOLD = f"{POKE_GOLD}{BOLD}======================================================================={RESET}"
@@ -751,6 +754,10 @@ def process_activity(activity, message, addr):
         display_message_above_prompt(BGOLD)
 
     elif activity == 2: 
+        seed = message.get("seed", seed)
+        if seed is not None:
+            random.seed(seed)
+
         my_name = "Player2"
         seq = message["sequence_number"]
 
@@ -763,6 +770,7 @@ def process_activity(activity, message, addr):
         display_message_above_prompt(BGOLD)
         display_message_above_prompt(f"  message_type: HANDSHAKE_RESPONSE")
         display_message_above_prompt(f"  message_text: The host responded to your handshake request")
+        display_message_above_prompt(f"  seed: {seed}")
         display_message_above_prompt(f"  sequence_number: {message['sequence_number']}\n  Expect Battle-Setup from Host")
         display_message_above_prompt(BGOLD)
 
@@ -1228,6 +1236,23 @@ while SESSION_ACTIVE:
             "pokemon_name" : my_pokemon, 
             "stat_boosts" : "{\"special_attack_uses\" : 5, \"special_defense_uses\" : 5}",
             "pokemon": json.dumps(pokemon_payload)
+        }
+
+    elif message_type == "HANDSHAKE_RESPONSE":
+        if my_role != "Host":
+            error_message("  Only Host can send HANDSHAKE_RESPONSE.")
+            continue
+
+        # Generate a seed once and reuse it if we resend
+        if seed is None:
+            seed = random.randint(0, 2**31 - 1)
+
+        # seed the Python RNG for this peer (optional)
+        random.seed(seed)
+
+        send_message = {
+            "message_type": message_type,
+            "seed": seed
         }
 
     elif message_type == "ATTACK_ANNOUNCE":
