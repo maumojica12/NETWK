@@ -595,6 +595,7 @@ def display_spectator_message(message):
     
     elif message["message_type"] == "GAME_OVER":
         seq = message['sequence_number']
+        print("\n")
         display_message_above_prompt(BRED)
         title = "GAME OVER"
         inner_width = 70  
@@ -610,8 +611,6 @@ def display_spectator_message(message):
         print(BRED)
 
         time.sleep(10)
-
-        os.system('cls')
 
         print(BGREEN)
         title = "THANK YOU"
@@ -847,7 +846,6 @@ def resolution_request():
 
         time.sleep(3)
 
-        os.system('cls')
         print(BGREEN)
         title = "THANK YOU"
         inner_width = 70
@@ -1067,6 +1065,7 @@ def process_activity(activity, message, addr):
 
     elif activity == 10: 
         seq = message['sequence_number']
+        print("\n")
         print(BRED)
         title = "GAME OVER"
         inner_width = 70  
@@ -1082,8 +1081,6 @@ def process_activity(activity, message, addr):
         print(BRED)
 
         time.sleep(10)
-
-        os.system('cls')
 
         print(BGREEN)
         title = "THANK YOU"
