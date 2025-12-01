@@ -366,6 +366,9 @@ def listen_for_host():
                 success_message(f"  Host Found ... Host IP: {host_ip}")
                 peer_addr = (host_ip, host_port)
                 info_message(f"  Connected to Host: {peer_addr}")
+
+                send_handshake_request()
+
                 break
 
         except socket.timeout:
@@ -445,12 +448,11 @@ def receive_messages():
         process_activity(activity, message_dict, addr)
 
 def send_ack(message, addr):
-    send_message = json.dumps({
-        "message_type" : "ACK",
-        "ack_number" : message["sequence_number"]
-        })
-
-    my_socket.sendto(send_message.encode(), addr)
+    send_message = {
+        "message_type": "ACK",
+        "ack_number": message["sequence_number"]
+    }
+    my_socket.sendto(encode_message(send_message), addr)
 
 def spectator_messages():
     global ack_received, my_name, seq
@@ -862,6 +864,42 @@ def resolution_request():
 
         os._exit(0)
 
+def send_handshake_request():
+    # Send a HANDSHAKE_REQUEST to Host automatically
+    global seq
+
+    if peer_addr is None:
+        return  # nothing to send to
+
+    seq += 1
+    msg = {
+        "message_type": "HANDSHAKE_REQUEST",
+        "sequence_number": seq,
+    }
+    my_socket.sendto(encode_message(msg), peer_addr)
+    info_message("  Sent HANDSHAKE_REQUEST to Host automatically.")
+
+def send_handshake_response():
+    # Automatically reply with HANDSHAKE_RESPONSE when given HANDSHAKE_REQUEST. Including seed.
+    global seed, seq
+
+    if peer_addr is None:
+        return
+
+    if seed is None:
+        seed = random.randint(0, 2**31 - 1)
+
+    random.seed(seed)
+
+    seq += 1
+    msg = {
+        "message_type": "HANDSHAKE_RESPONSE",
+        "seed": seed,
+        "sequence_number": seq,
+    }
+    my_socket.sendto(encode_message(msg), peer_addr)
+    info_message(f"  Sent HANDSHAKE_RESPONSE with seed {seed}.")
+
 def process_activity(activity, message, addr):
     global seed, peer_addr, battle_state, my_pokemon, opponent_pokemon, comm_mode, seq, my_name, ack_received, SESSION_ACTIVE, BROADCAST_ACTIVE, next_attacker, resolution
 
@@ -880,6 +918,7 @@ def process_activity(activity, message, addr):
         display_message_above_prompt(f"  message_text: Peer is requesting for handshake")
         display_message_above_prompt(f"  sequence_number: {message['sequence_number']}\n  RESPOND HANDSHAKE_RESPONSE")
         display_message_above_prompt(BGOLD)
+        send_handshake_response()
 
     elif activity == 2: 
         seed = message.get("seed", seed)
@@ -1109,7 +1148,7 @@ def process_activity(activity, message, addr):
         seq = message['sequence_number']
 
         if (addr != peer_addr) and (comm_mode == "BROADCAST") and (my_role == "Host"): # Spectator's message should be broadcasted to spectators if comm_mode is BROADCAST
-            my_socket.sendto(json.dumps(message).encode(), peer_addr)
+            my_socket.sendto(encode_message(message).encode(), peer_addr)
 
         display_message_above_prompt(BYELLOW)
         title = "CHAT MESSAGE"
