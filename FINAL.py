@@ -344,6 +344,7 @@ def receive_messages():
 
         # forward tarffic to specattors if we're Host in braodcast mode
         if comm_mode == "BROADCAST" and my_role == "Host" and mes in [
+            "BATTLE_SETUP",
             "ATTACK_ANNOUNCE",
             "DEFENSE_ANNOUNCE",
             "CALCULATION_REPORT",
@@ -783,7 +784,7 @@ def process_activity(activity, message, addr):
         display_message_above_prompt(f"{POKE_PINK}{BOLD}{centered_title}{RESET}")
         display_message_above_prompt(BPINK)
         display_message_above_prompt(f"  message_type: SPECTATOR_REQUEST")
-        display_message_above_prompt(f"  spectator_name: {message_dict["name"]}")
+        display_message_above_prompt(f"  spectator_name: {message_dict['name']}")
         display_message_above_prompt(f"  sequence_number: {seq}\n  Use BROADCAST mode to spectate battle")
         display_message_above_prompt(BPINK)
         ack_received = False
@@ -982,8 +983,8 @@ def process_activity(activity, message, addr):
         display_message_above_prompt(f"{POKE_YELLOW}{BOLD}{centered_title}{RESET}")
         display_message_above_prompt(BYELLOW)
         display_message_above_prompt(f"  message_type: CHAT_MESSAGE", POKE_YELLOW)
-        display_message_above_prompt(f"  sender_name: {message["sender_name"]}", POKE_YELLOW)
-        display_message_above_prompt(f"  content_type: {message["content_type"]}", POKE_YELLOW)
+        display_message_above_prompt(f"  sender_name: {message['sender_name']}", POKE_YELLOW)
+        display_message_above_prompt(f"  content_type: {message['content_type']}", POKE_YELLOW)
 
         if message['content_type'] == "TEXT":
             display_message_above_prompt(f"  message_text: {message['message_text']}", POKE_YELLOW)
@@ -1208,11 +1209,25 @@ while SESSION_ACTIVE:
             comm_mode = comm_input
             next_attacker = my_pokemon
 
+        # pokemon payload as per RFC
+        pokemon_payload = {
+            "name": my_pokemon,
+            "hp": my_data["hp"],
+            "attack": my_data["attack"],
+            "defense": my_data["defense"],
+            "sp_attack": my_data["special attack"],
+            "sp_defense": my_data["special defense"],
+            "speed": my_data["speed"],
+            "type1": my_data["type_1"],
+            "type2": my_data["type_2"],
+        }
+            
         send_message = {
             "message_type" : message_type, 
             "communication_mode" : comm_input, 
             "pokemon_name" : my_pokemon, 
-            "stat_boosts" : "{\"special_attack_uses\" : 5, \"special_defense_uses\" : 5}"
+            "stat_boosts" : "{\"special_attack_uses\" : 5, \"special_defense_uses\" : 5}",
+            "pokemon": json.dumps(pokemon_payload)
         }
 
     elif message_type == "ATTACK_ANNOUNCE":
