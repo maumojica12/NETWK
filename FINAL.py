@@ -1297,6 +1297,11 @@ while SESSION_ACTIVE:
     else: 
         send_message = {"message_type" : message_type}
 
+    # Safety. Prevents sending messages until a peer has connected and done the handshake
+    if peer_addr is None and my_role != "Spectator":
+        display_message_above_prompt("  No peer connected yet. Wait for a Joiner to connect before sending this message.", POKE_RED)
+        continue
+
     while (not ack_received) and (message_sent_count < MAX_RETRIES) and (not message_type == "RESOLUTION_REQUEST"): # To prevent mismatch in SEQ. I inserted the incrementation before sending the message to accurately retrieve the latest SEQ.
         if message_sent_count == 0:
             seq += 1
