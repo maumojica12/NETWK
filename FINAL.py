@@ -767,6 +767,10 @@ def calculation_report():
     }
 
     my_socket.sendto(encode_message(send_message), peer_addr) 
+    # ALSO send GAME_OVER to spectators if in broadcast mode
+    if comm_mode == "BROADCAST" and my_role == "Host":
+        send_to_spectators(send_message, True)
+
 
 def calculation_confirm():
     global attacker, last_move_name, last_opponent_move, SESSION_ACTIVE, BROADCAST_ACTIVE, next_attacker, seq
